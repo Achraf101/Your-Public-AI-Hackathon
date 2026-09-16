@@ -10,7 +10,8 @@
     "functions": "supabase functions serve --env-file .env",
     "import:street": "tsx scripts/import-vkbo.ts --nis 11040 --street Paalstraat",
     "import:sample": "tsx scripts/import-vkbo.ts --nis 11040 --geojson KBO/schoten-kbo-1000-2026-09-07.geojson",
-    "web": "npm --prefix web run dev"
+    "web": "npm --prefix web run dev",
+    "sync:municipalities": "tsx scripts/sync-municipalities.ts"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.57.0",

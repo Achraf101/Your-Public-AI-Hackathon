@@ -122,23 +122,47 @@ const GOOGLE_STATUS_NL: Record<string, string> = {
 type Target = {
   names: string[]; street: string | null; houseNumber: string | null; postcode: string | null; municipality: string | null;
   lat: number | null; lon: number | null; enterprise_number: string | null; establishment_number: string | null;
+  phones: string[]; domains: string[];
+};
+
+/** Laatste 9 cijfers: 03 828 83 16, +32 3 828 83 16 en 038288316 worden gelijk. */
+const phoneKey = (p: string | null | undefined) => { const d = (p ?? '').replace(/\D/g, ''); return d.length >= 8 ? d.slice(-9) : null; };
+const hostKey = (u: string | null | undefined) => {
+  if (!u) return null;
+  const s = u.includes('@') ? u.split('@')[1] : u;
+  try { return new URL(/^https?:\/\//i.test(s) ? s : `https://${s.trim()}`).hostname.replace(/^www\./, '').toLowerCase(); } catch { return null; }
 };
 
 async function loadTarget(db: SupabaseClient, s: Subject): Promise<Target> {
+  let base: Omit<Target, 'phones' | 'domains'>;
+  let entNr: string;
+  const phones: (string | null)[] = [];
+  const mails: (string | null)[] = [];
   if (s.subject_type === 'establishment') {
     const { data: e, error } = await db.from('establishments').select('*').eq('establishment_number', s.number).single();
     if (error) throw new Error(`Vestiging ${s.number} niet gevonden`);
-    return {
+    base = {
       names: [e.commercial_name, e.name].filter(Boolean), street: e.kbo_street, houseNumber: e.kbo_house_number, postcode: e.kbo_postcode,
       municipality: e.kbo_municipality, lat: e.lat, lon: e.lon, enterprise_number: null, establishment_number: s.number,
     };
+    entNr = e.enterprise_number;
+    phones.push(e.phone); mails.push(e.email);
+  } else {
+    const { data: e, error } = await db.from('enterprises').select('*').eq('enterprise_number', s.number).single();
+    if (error) throw new Error(`Onderneming ${s.number} niet gevonden`);
+    base = {
+      names: [e.commercial_name, e.name, e.abbreviation].filter(Boolean), street: e.seat_street, houseNumber: e.seat_house_number,
+      postcode: e.seat_postcode, municipality: e.seat_municipality, lat: e.seat_lat, lon: e.seat_lon, enterprise_number: s.number, establishment_number: null,
+    };
+    entNr = s.number;
   }
-  const { data: e, error } = await db.from('enterprises').select('*').eq('enterprise_number', s.number).single();
-  if (error) throw new Error(`Onderneming ${s.number} niet gevonden`);
-  return {
-    names: [e.commercial_name, e.name, e.abbreviation].filter(Boolean), street: e.seat_street, houseNumber: e.seat_house_number,
-    postcode: e.seat_postcode, municipality: e.seat_municipality, lat: e.seat_lat, lon: e.seat_lon, enterprise_number: s.number, establishment_number: null,
-  };
+  // Contactgegevens uit het register (VKBO + KBO API) voor de identiteitscheck.
+  const { data: ent } = await db.from('enterprises').select('phone,email').eq('enterprise_number', entNr).maybeSingle();
+  phones.push(ent?.phone ?? null); mails.push(ent?.email ?? null);
+  const { data: kbo } = await db.from('evidence').select('value').eq('source', 'kbo_api').eq('enterprise_number', entNr).eq('evidence_type', 'phone');
+  for (const k of kbo ?? []) { phones.push(k.value?.phone); mails.push(k.value?.email); mails.push(k.value?.web); }
+  const domains = mails.map(hostKey).filter((d): d is string => !!d && !GENERIC_MAIL.test(d + '.') && !GENERIC_MAIL.test(d));
+  return { ...base, phones: [...new Set(phones.map(phoneKey).filter((p): p is string => !!p))], domains: [...new Set(domains)] };
 }
 
 function component(place: any, type: string): string | null {
@@ -158,17 +182,30 @@ export function assessGoogleMatch(t: Target, place: any) {
   const distance = t.lat != null && t.lon != null && place.location
     ? Math.round(distanceMeters(t.lat, t.lon, place.location.latitude, place.location.longitude)) : null;
   const addressMatch = streetMatch && numberMatch;
+  // Identiteitscheck: zelfde telefoonnummer of zelfde website/e-maildomein als in het register.
+  const gPhone = phoneKey(place.nationalPhoneNumber);
+  const gHost = hostKey(place.websiteUri);
+  const phoneMatch = !!gPhone && t.phones.includes(gPhone);
+  const domainMatch = !!gHost && t.domains.some((d) => d === gHost || gHost.endsWith('.' + d) || d.endsWith('.' + gHost));
+  const identityMatch = phoneMatch || domainMatch;
+
   let quality: 'exact' | 'probable' | 'uncertain' = 'uncertain';
-  if (addressMatch && nameScore >= 0.8) quality = 'exact';
-  else if ((addressMatch && nameScore >= 0.5) || (nameScore >= 0.8 && streetMatch) || (nameScore >= 0.8 && distance != null && distance <= 75)) quality = 'probable';
+  if ((addressMatch && nameScore >= 0.8) || (identityMatch && addressMatch)) quality = 'exact';
+  else if (identityMatch || (addressMatch && nameScore >= 0.5) || (nameScore >= 0.8 && streetMatch) || (nameScore >= 0.8 && distance != null && distance <= 75)) quality = 'probable';
   const explanation = [
     `naam ${Math.round(nameScore * 100)}% gelijk ("${name}")`,
     streetMatch ? 'straat gelijk' : `straat verschilt (${gStreet ?? 'onbekend'})`,
     numberMatch ? 'huisnummer gelijk' : `huisnummer verschilt (${gNumber ?? 'onbekend'})`,
     postcodeMatch ? 'postcode gelijk' : `postcode ${gPostcode ?? 'onbekend'}`,
     distance != null ? `${distance} m van registercoördinaat` : 'geen betrouwbare registercoördinaat',
-  ].join(' · ');
-  return { quality, score: nameScore + (addressMatch ? 1 : streetMatch ? 0.3 : 0), details: { nameScore, streetMatch, numberMatch, postcodeMatch, distance, explanation } };
+    phoneMatch ? 'telefoon gelijk aan register' : null,
+    domainMatch ? 'website/e-maildomein gelijk aan register' : null,
+  ].filter(Boolean).join(' · ');
+  return {
+    quality,
+    score: nameScore + (addressMatch ? 1 : streetMatch ? 0.3 : 0) + (identityMatch ? 1.5 : 0),
+    details: { nameScore, streetMatch, numberMatch, postcodeMatch, distance, phoneMatch, domainMatch, explanation },
+  };
 }
 
 export async function runGoogle(db: SupabaseClient, s: Subject, opts: { force?: boolean } = {}): Promise<StepResult> {
@@ -186,29 +223,57 @@ export async function runGoogle(db: SupabaseClient, s: Subject, opts: { force?: 
     if (!(await consumeQuota(db, source, { dailyEnv: 'GOOGLE_PLACES_DAILY_LIMIT', dailyDefault: 10, monthlyEnv: 'GOOGLE_PLACES_MONTHLY_LIMIT', monthlyDefault: 900 }))) {
       return { source, status: 'limit', message: 'Gratis limiet Google Places bereikt (dag of maand); geen request verstuurd' };
     }
+    const search = async (textQuery: string, withBias: boolean) => {
+      const body: Record<string, unknown> = { textQuery, languageCode: 'nl', regionCode: 'BE', pageSize: 3 };
+      if (withBias && t.lat != null && t.lon != null) body.locationBias = { circle: { center: { latitude: t.lat, longitude: t.lon }, radius: 500 } };
+      const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': GOOGLE_FIELD_MASK }, body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(`Google Places fout ${r.status}: ${data?.error?.message ?? 'onbekend'}`);
+      return (data.places ?? []) as any[];
+    };
+    // Een zaak heeft altijd een businessStatus; resultaten zonder zijn enkel een adres/gebouw (bv. een woning).
+    const isBusiness = (p: any) => !!p.businessStatus;
+
     const textQuery = [t.names[0], t.street, t.houseNumber, t.postcode, t.municipality].filter(Boolean).join(' ');
-    const body: Record<string, unknown> = { textQuery, languageCode: 'nl', regionCode: 'BE', pageSize: 3 };
-    if (t.lat != null && t.lon != null) body.locationBias = { circle: { center: { latitude: t.lat, longitude: t.lon }, radius: 500 } };
-    const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': GOOGLE_FIELD_MASK }, body: JSON.stringify(body),
-    });
-    const data = await r.json();
-    if (!r.ok) return { source, status: 'error', message: `Google Places fout ${r.status}: ${data?.error?.message ?? 'onbekend'}` };
+    let raw = await search(textQuery, true);
+    const queries = [textQuery];
+    let addressOnly = raw.length > 0 && !raw.some(isBusiness);
+    // Tweede poging op naam + gemeente (bv. zaak staat op Google onder een ander adres). Telt mee in de limiet.
+    if (!raw.some(isBusiness) && t.municipality) {
+      const fallbackQuery = `${t.names[0]} ${t.municipality}`;
+      if (await consumeQuota(db, source, { dailyEnv: 'GOOGLE_PLACES_DAILY_LIMIT', dailyDefault: 10, monthlyEnv: 'GOOGLE_PLACES_MONTHLY_LIMIT', monthlyDefault: 900 })) {
+        const extra = await search(fallbackQuery, false);
+        queries.push(fallbackQuery);
+        raw = [...raw, ...extra.filter((p) => !raw.some((q) => q.id === p.id))];
+      }
+    }
+    const places = raw.filter(isBusiness);
+    addressOnly = addressOnly && !places.length;
 
     const retrieved_at = new Date().toISOString();
     const subjectRef = { enterprise_number: t.enterprise_number, establishment_number: t.establishment_number };
-    const places: any[] = data.places ?? [];
     const rows: Record<string, unknown>[] = [];
-    if (!places.length) rows.push({ ...subjectRef, source, evidence_type: 'no_result', value: { textQuery }, summary_nl: `Google Places: geen resultaat voor "${textQuery}"`, retrieved_at });
+    if (!places.length) {
+      const addr = raw.find((p) => !isBusiness(p));
+      rows.push({
+        ...subjectRef, source, evidence_type: 'no_result', retrieved_at, url: addr?.googleMapsUri ?? null,
+        value: { queries, address_only: addressOnly, non_business_results: raw.map((p) => ({ name: p.displayName?.text, address: p.formattedAddress, types: p.types ?? [] })) },
+        summary_nl: addressOnly
+          ? `Google Places: geen zaak gevonden voor "${t.names[0]}" — enkel het adres zelf (${addr?.formattedAddress ?? 'gebouw/woning'}), zonder bedrijfsvermelding`
+          : `Google Places: geen zaak gevonden (${queries.map((q) => `"${q}"`).join(' en ')})`,
+      });
+    }
     const assessed = places.map((p) => ({ p, m: assessGoogleMatch(t, p) })).sort((a, b) => b.m.score - a.m.score);
     assessed.forEach(({ p, m }, i) => {
       const common = { ...subjectRef, source, source_record_id: p.id, url: p.googleMapsUri ?? null, retrieved_at, match_quality: m.quality, match_details: m.details };
       rows.push({
         ...common, evidence_type: 'place_match', raw: p,
-        value: { rank: i + 1, textQuery, name: p.displayName?.text, address: p.formattedAddress, business_status: p.businessStatus ?? null, rating: p.rating ?? null, user_rating_count: p.userRatingCount ?? null, types: p.types ?? [] },
+        value: { rank: i + 1, textQuery: queries.join(' | '), name: p.displayName?.text, address: p.formattedAddress, business_status: p.businessStatus ?? null, rating: p.rating ?? null, user_rating_count: p.userRatingCount ?? null, types: p.types ?? [] },
         summary_nl: `Google-kandidaat ${i + 1}: ${p.displayName?.text ?? '?'} — ${p.formattedAddress ?? 'adres onbekend'} (match: ${m.quality}; ${m.details.explanation})`,
       });
-      if (i !== 0) return;
+      if (i !== 0 || m.quality === 'uncertain') return;
       if (p.businessStatus) rows.push({ ...common, evidence_type: 'business_status', value: { business_status: p.businessStatus, user_rating_count: p.userRatingCount ?? null }, summary_nl: `Google Places: ${GOOGLE_STATUS_NL[p.businessStatus] ?? p.businessStatus}${p.userRatingCount ? ` · ${p.userRatingCount} beoordelingen (${p.rating}★)` : ''}` });
       if (p.regularOpeningHours?.weekdayDescriptions?.length) rows.push({ ...common, evidence_type: 'opening_hours', value: { weekday_descriptions: p.regularOpeningHours.weekdayDescriptions }, summary_nl: `Google Places: openingsuren vermeld (${p.regularOpeningHours.weekdayDescriptions.length} dagen)` });
       if (p.websiteUri) rows.push({ ...common, evidence_type: 'website', value: { website: p.websiteUri }, url: p.websiteUri, summary_nl: `Google Places: website ${p.websiteUri}` });
@@ -217,7 +282,7 @@ export async function runGoogle(db: SupabaseClient, s: Subject, opts: { force?: 
     });
     const { error } = await db.from('evidence').insert(rows);
     if (error) throw error;
-    return { source, status: 'ok', message: places.length ? `Google: ${places.length} kandidaat/kandidaten, beste match ${assessed[0].m.quality}` : 'Google: geen resultaat' };
+    return { source, status: 'ok', message: places.length ? `Google: ${places.length} zaak/zaken gevonden, beste match ${assessed[0].m.quality}` : addressOnly ? 'Google: geen zaak op dit adres (enkel het gebouw/woning)' : `Google: geen zaak gevonden (${queries.length} zoekpoging${queries.length > 1 ? 'en' : ''})` };
   } catch (e) {
     return { source, status: 'error', message: e instanceof Error ? e.message : String(e) };
   }

@@ -1,7 +1,7 @@
 # Bedrijvenradar — PROV-AI Challenge 1 · Find the Real Businesses
 
-MVP voor medewerkers lokale economie: **zoek een zaak (naam / adres / ondernemingsnummer) → controleer activiteit via meerdere bronnen → activiteitsscore met uitleg → bevestigen/afwijzen**.
-De medewerker neemt altijd de eindbeslissing; enkel bevestigde voorstellen verlaten de tool (`approved_changes`).
+MVP voor medewerkers lokale economie: **zoek een straat, adres, naam of ondernemingsnummer → lijst van zaken met score → zaak openen voor uitleg → aangevinkte zaken exporteren**.
+Goedkeuring vóór publicatie: enkel wat de gebruiker aanvinkt verlaat de tool (Excel-export), en elke export wordt gelogd in `exports`.
 
 ## Snel starten (lokaal, Windows/macOS/Linux)
 
@@ -18,6 +18,7 @@ npx supabase status -o env       # kopieer API_URL / SERVICE_ROLE_KEY / ANON_KEY
 2. `web/.env.local` — kopieer `web/.env.example`, vul `VITE_SUPABASE_URL` en `VITE_SUPABASE_ANON_KEY` (publieke key).
 
 ```bash
+npm run sync:municipalities      # alle 67 gemeenten van de provincie Antwerpen (VRBG 2025, open data)
 npm run functions                # Edge Functions lokaal (apart terminalvenster)
 npm run web                      # http://localhost:5173
 ```
@@ -28,10 +29,11 @@ Zoeken haalt records live uit de VKBO; bulkimport is optioneel: `npm run import:
 
 ```
 web/ (React + Vite + TS + Tailwind)          ── enkel publieke anon key
-  SearchPage → RecordDetail (+ ReviewPanel, EvidenceList, UsageBar)
-        │ supabase-js: lezen + officer_reviews invoegen · functions.invoke
+  SearchPage (lijst + export) → RecordDetail (conclusie, waarom, bronnen, gegevens, contact, bewijsstukken)
+        │ supabase-js: lezen + exports invoegen · functions.invoke
 supabase/functions/ (Deno Edge Functions)    ── geheime keys enkel hier
-  search           zoekt in VKBO op naam/adres/nummer binnen gekozen gemeente (gratis); nummer niet gevonden → KBO API
+  search           zoekt in VKBO op straat/adres/naam/nummer (gratis); voegt onderneming+vestiging op zelfde adres samen tot één zaak;
+                   laat VME's/BTW-eenheden en zaken met score < 30 weg (behalve bij zoeken op nummer)
   check-activity   KBO API → jaarrekening.be → (Google Places via knop) → websitecheck → activiteitsscore
   enrich-kbo / enrich-google / enrich-accounts / analyze   losse stappen (zelfde modules)
   _shared/         vkbo.ts, sources.ts (alle bronnen), rules.ts (rules-v2), analysis.ts, normalize.ts, http.ts
@@ -43,12 +45,13 @@ scripts/import-vkbo.ts  optionele bulkimport (gebruikt _shared/vkbo.ts)
 
 | Tabel | Inhoud |
 |---|---|
-| `municipalities` | NIS-code, naam, postcodes |
+| `municipalities` | NIS-code, naam, bounding box — gesynchroniseerd uit de officiële gemeentegrenzen (VRBG 2025). Andere provincie: `tsx scripts/sync-municipalities.ts --prefix 4 --province Oost-Vlaanderen` |
 | `enterprises` | Juridische entiteit. Status staat hier. `completeness = number_only` = moeder enkel als nummer bekend (vaak eenmanszaak, niet in VKBO) |
 | `establishments` | Fysieke vestiging, gekoppeld via `enterprise_number`. KBO- én adressenregister-adres, `geo_quality` |
 | `evidence` | Eén observatie uit één bron: `source`, `source_record_id`, `summary_nl`, `value`, `url`, `observed_at`, `retrieved_at`, `match_quality` |
 | `analysis` | Voorstel: `proposed_status`, `confidence` (HIGH/MEDIUM/LOW), `reasons[]` met `evidence_ids`, `model_version`. Oude voorstellen blijven bewaard |
-| `officer_reviews` | Append-only: `decision` (confirmed/rejected), optionele `final_status`, `comment`, `reviewer` (naamveld) |
+| `exports` | Log van elke export: zoekopdracht, aantal en de aangevinkte zaken (goedkeuring vóór publicatie) |
+| `officer_reviews` | (niet meer gebruikt in de interface) |
 | `api_usage` | Harde daglimiet per externe API (`consume_api_quota`, niet aanroepbaar vanuit frontend) |
 
 Views: `street_records` (vestigingen + zetels per straat met laatste voorstel/beslissing), `approved_changes` (enkel bevestigd).
@@ -76,13 +79,12 @@ De score is **geen gekalibreerde kans**; kalibratie vraagt validatie met door me
 | Website | bereikbaar (+ vermeldt gemeente) · sluitingssignaal · domein bestaat niet · technische fout | +4 (+8) · −10 · −8 · 0 |
 
 Conflict (bv. register failliet + Google open) → voorstel "Conflict — manuele controle", zekerheid LOW.
-Google-matchkwaliteit: **exact** = straat + huisnummer gelijk én naam ≥ 80 % gelijk; **probable** = adres gelijk + naam ≥ 50 %, of naam ≥ 80 % + zelfde straat of ≤ 75 m; anders **uncertain** (getoond, niet meegeteld).
+Google-koppeling gebeurt automatisch, zonder vraag aan de gebruiker. Dezelfde zaak als: zelfde **telefoonnummer** of **website/e-maildomein** als in het register, of zelfde adres + naam ≥ 50 % gelijk, of naam ≥ 80 % + zelfde straat of ≤ 75 m. Anders telt het resultaat niet mee (enkel zichtbaar bij de bewijsstukken).
 
 ### Kosten (gratis houden)
 
 - Google Places enkel via knop (`GOOGLE_AUTO_ON_OPEN=false`), cache 7 dagen, harde limiet 10/dag en 900/maand (gratis volume Enterprise-SKU = 1.000/maand).
 - KBO API: 200/dag, 5.000/maand (gratis plan 2.500/dag). Jaarrekening.be: 60/dag, 190/maand, cache 30 dagen, na fout 6 uur pauze.
-- Verbruik staat rechtsboven in de app.
 
 ### Wanneer bronnen verschillen
 
@@ -105,7 +107,8 @@ coördinaat → VKBO tenzij placeholder · contact → per bron, met niveau (ves
 - 36 records in het starterbestand hebben een nep-coördinaat (49.2933, 2.3067); die worden als `placeholder` gemarkeerd.
 - Google Places is bewijs, geen waarheid; maximaal 3 kandidaten per zoekopdracht; recensiedatums worden (nog) niet opgehaald.
 - Jaarrekening.be: koppeling actief, maar het huidige account antwoordt "API request limit reached" (plan/limiet van het account).
-- Geen login: reviewer is een naamveld.
+- Geen login: iedereen met toegang kan zoeken en exporteren.
+- Scores in de lijst zijn eerst gebaseerd op het register; de volledige controle gebeurt bij het openen van een zaak.
 
 Wijzigingen aan env-variabelen: zie [docs/ENV_CHANGES.md](docs/ENV_CHANGES.md).
 

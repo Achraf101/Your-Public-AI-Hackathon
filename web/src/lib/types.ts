@@ -77,17 +77,31 @@ export type SearchResult = {
   number: string;
   enterprise_number: string;
   name: string | null;
-  official_name: string | null;
   address: string;
+  street: string | null;
+  house_number: string | null;
   postcode: string | null;
   municipality: string | null;
   in_municipality: boolean;
-  enterprise_name: string | null;
-  enterprise_completeness: 'full' | 'number_only';
   legal_status_norm: string;
-  seat_municipality: string | null;
-  start_date: string | null;
-  analysis: { activity_score: number | null; activity_label: ActivityLabel | null; confidence: Confidence; proposed_status: ProposedStatus; created_at: string } | null;
+  enterprise_known: boolean;
+  score: number;
+  label: ActivityLabel;
+  confidence: Confidence;
+  score_basis: 'full' | 'register';
+  registrations: number;
+};
+
+export type SearchResponse = {
+  mode: 'name' | 'address' | 'street' | 'number';
+  interpreted: string;
+  retrieved_at: string;
+  count: number;
+  results: SearchResult[];
+  hidden_low: number;
+  hidden_noise: number;
+  min_score: number;
+  truncated: boolean;
 };
 
 export type StepResult = { source: string; status: 'ok' | 'cached' | 'skipped' | 'limit' | 'error'; message: string };

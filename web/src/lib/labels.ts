@@ -103,3 +103,21 @@ export const STEP_STATUS: Record<string, { label: string; style: string }> = {
   limit: { label: 'limiet', style: 'text-amber-700' },
   error: { label: 'fout', style: 'text-rose-700' },
 };
+
+/** Registerstatus in gewone taal. */
+export const REGISTER_PLAIN: Record<string, string> = {
+  normal: 'In orde',
+  liquidation: 'Wordt stopgezet',
+  bankruptcy: 'Failliet',
+  dissolved: 'Ontbonden',
+  reorganisation: 'In reorganisatie',
+  other: 'Andere toestand',
+  unknown: 'Nog niet bekend',
+};
+
+/** Zekerheid in gewone taal. */
+export const CONFIDENCE_PLAIN: Record<string, { short: string; long: string; dots: number }> = {
+  HIGH: { short: 'Zeker', long: 'Meerdere bronnen zeggen hetzelfde.', dots: 3 },
+  MEDIUM: { short: 'Redelijk zeker', long: 'Er is duidelijk bewijs, maar nog niet uit meerdere bronnen.', dots: 2 },
+  LOW: { short: 'Weinig zeker', long: 'Er is nog te weinig bewijs, of de bronnen spreken elkaar tegen.', dots: 1 },
+};

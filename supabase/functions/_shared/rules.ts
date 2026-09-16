@@ -14,7 +14,7 @@ export type ProposedStatus =
 
 export type EvidenceRow = {
   id: string; source: string; evidence_type: string; value: any; summary_nl: string;
-  match_quality: 'exact' | 'probable' | 'uncertain' | null; retrieved_at: string; observed_at: string | null;
+  match_quality: 'exact' | 'probable' | 'uncertain' | null; match_details?: any; retrieved_at: string; observed_at: string | null;
   establishment_number: string | null; enterprise_number: string | null;
 };
 
@@ -67,50 +67,65 @@ export function analyze(input: AnalysisInput): AnalysisResult {
   const legalEv = latest(ev.filter((e) => e.evidence_type === 'legal_status' && !e.establishment_number && !e.value?.conflict));
   const legal = input.legal_status_norm;
   if (input.enterprise_completeness === 'number_only') {
-    add('R0_parent_unknown', 0, 'Onderneming enkel als nummer bekend: juridische status nog niet opgehaald.', 'none', [], 'uncertainty');
-  } else if (legal === 'bankruptcy') add('R1_bankruptcy', -40, 'Register: onderneming in faillissement.', 'register', [legalEv]);
-  else if (legal === 'dissolved') add('R1_dissolved', -40, 'Register: onderneming ontbonden.', 'register', [legalEv]);
-  else if (legal === 'liquidation') add('R1_liquidation', -35, 'Register: onderneming in vereffening.', 'register', [legalEv]);
-  else if (legal === 'reorganisation') add('R1_reorganisation', -10, 'Register: gerechtelijke reorganisatie.', 'register', [legalEv]);
-  else if (legal === 'normal') add('R1_normal', 5, 'Register: normale toestand (zegt weinig: het register loopt achter).', 'register', [legalEv]);
+    add('R0_parent_unknown', 0, 'We kennen de onderneming achter deze zaak nog niet (klik op Opnieuw controleren).', 'none', [], 'uncertainty');
+  } else if (legal === 'bankruptcy') add('R1_bankruptcy', -40, 'De onderneming is failliet verklaard.', 'register', [legalEv]);
+  else if (legal === 'dissolved') add('R1_dissolved', -40, 'De onderneming is ontbonden.', 'register', [legalEv]);
+  else if (legal === 'liquidation') add('R1_liquidation', -35, 'De onderneming wordt stopgezet (vereffening).', 'register', [legalEv]);
+  else if (legal === 'reorganisation') add('R1_reorganisation', -10, 'De onderneming zit in een gerechtelijke reorganisatie.', 'register', [legalEv]);
+  else if (legal === 'normal') add('R1_normal', 5, 'Volgens het register is de onderneming in orde (dat zegt weinig: het register loopt vaak achter).', 'register', [legalEv]);
 
   const kboStatus = latest(ev.filter((e) => e.source === 'kbo_api' && e.evidence_type === 'legal_status' && e.value?.status));
-  if (kboStatus && kboStatus.value.status !== 'active') add('R2_kbo_stopped', -40, `KBO API: status "${kboStatus.value.status}".`, 'register', [kboStatus]);
+  if (kboStatus && kboStatus.value.status !== 'active') add('R2_kbo_stopped', -40, 'Volgens de KBO is de onderneming niet meer actief.', 'register', [kboStatus]);
   const legalConflict = ev.find((e) => e.evidence_type === 'legal_status' && e.value?.conflict);
   if (legalConflict) add('R2_source_conflict', 0, legalConflict.summary_nl, 'register', [legalConflict], 'conflict');
 
   if (input.enterprise_ex_officio_strike_off) {
     const reason = String(input.enterprise_ex_officio_strike_off.reason ?? '');
-    add('R3_ex_officio', reason.includes('jaarrekening') ? -25 : -15, `Register: ambtshalve doorhaling (${reason || 'reden onbekend'}).`, 'register', ev.filter((e) => e.evidence_type === 'strike_off' && !e.establishment_number));
+    add('R3_ex_officio', reason.includes('jaarrekening') ? -25 : -15, `De onderneming werd door de overheid geschrapt${reason ? ` (${reason.toLowerCase()})` : ''}.`, 'register', ev.filter((e) => e.evidence_type === 'strike_off' && !e.establishment_number));
   }
   const estStrike = ev.filter((e) => e.evidence_type === 'strike_off' && e.establishment_number);
-  if (input.subject_address_struck_off || estStrike.length) add('R4_struck', -25, 'Register: adres of vestiging doorgehaald.', 'register', estStrike);
+  if (input.subject_address_struck_off || estStrike.length) add('R4_struck', -25, 'Het adres of de vestiging werd geschrapt in het register.', 'register', estStrike);
 
   const startAge = yearsAgo(input.subject_start_date ?? input.enterprise_start_date, today);
-  if (startAge != null && startAge < 2) add('R5_recent_start', 5, `Recent gestart (${(input.subject_start_date ?? input.enterprise_start_date)!.slice(0, 10)}).`, 'register');
-  if (input.address_mismatch) add('R6_address_mismatch', 0, 'KBO-adres wijkt af van het adressenregister.', 'none', ev.filter((e) => e.source === 'vkbo' && e.evidence_type === 'address'), 'uncertainty');
-  if (input.geo_quality !== 'ok') add('R7_geo', 0, `Coördinaat niet bruikbaar (${input.geo_quality}).`, 'none', [], 'uncertainty');
-  if ((input.enterprise_legal_form ?? '').toLowerCase().includes('mede-eigenaars')) add('R8_vme', 0, 'Vereniging van mede-eigenaars: meestal geen handelszaak.', 'none');
+  if (startAge != null && startAge < 2) add('R5_recent_start', 5, `Recent gestart (${(input.subject_start_date ?? input.enterprise_start_date)!.slice(0, 4)}).`, 'register');
+  if (input.address_mismatch) add('R6_address_mismatch', 0, 'Het adres in het register is niet helemaal volledig of correct.', 'none', ev.filter((e) => e.source === 'vkbo' && e.evidence_type === 'address'), 'uncertainty');
+  if (input.geo_quality !== 'ok') add('R7_geo', 0, 'De ligging op de kaart is onbekend.', 'none', [], 'uncertainty');
+  if ((input.enterprise_legal_form ?? '').toLowerCase().includes('mede-eigenaars')) add('R8_vme', 0, 'Dit is een vereniging van mede-eigenaars, geen handelszaak.', 'none');
 
   // ---------------- Google Places ----------------
-  const gStatusEv = latest(ev.filter((e) => e.source === 'google_places' && e.evidence_type === 'business_status'));
-  const gNoResult = latest(ev.filter((e) => e.source === 'google_places' && e.evidence_type === 'no_result'));
+  // Enkel de laatste Google-controle telt.
+  const googleRows = ev.filter((e) => e.source === 'google_places');
+  const lastRun = googleRows.length ? latest(googleRows)!.retrieved_at : null;
+  const run = googleRows.filter((e) => e.retrieved_at === lastRun);
+  const gStatusEv = run.find((e) => e.evidence_type === 'business_status');
   const strong = gStatusEv && gStatusEv.match_quality !== 'uncertain' ? gStatusEv : undefined;
   const gStatus: string | null = strong?.value?.business_status ?? null;
-  if (gStatusEv && !strong) add('G0_uncertain', 0, `Google-resultaat gevonden, maar match onzeker (${gStatusEv.value?.business_status ?? '?'}): niet meegeteld.`, 'none', [gStatusEv], 'uncertainty');
-  else if (!gStatusEv && gNoResult) add('G0_no_result', -5, 'Google Places: geen vermelding gevonden.', 'google', [gNoResult]);
-  else if (!gStatusEv) add('G0_not_checked', 0, 'Google Places nog niet gecontroleerd.', 'none', [], 'uncertainty');
+  const gNoResult = run.find((e) => e.evidence_type === 'no_result');
+  const candidates = run.filter((e) => e.evidence_type === 'place_match');
+  const googleChecked = !!lastRun;
+  if (!googleChecked) {
+    add('G0_not_checked', 0, 'Google is nog niet gecontroleerd.', 'none', [], 'uncertainty');
+  } else if (!strong && gNoResult?.value?.address_only) {
+    add('G0_no_business', -5, 'Google kent geen zaak op dit adres, enkel het gebouw.', 'google', [gNoResult]);
+  } else if (!strong && gNoResult) {
+    add('G0_no_result', -5, 'Google kent deze zaak niet.', 'google', [gNoResult]);
+  } else if (!strong) {
+    // Kandidaten gevonden, maar geen enkele komt zeker overeen (naam/adres/telefoon/website): niet meegeteld.
+    add('G0_no_sure_match', 0, 'Google vond geen zaak die zeker overeenkomt met deze naam en dit adres.', 'none', candidates, 'uncertainty');
+  }
   if (strong) {
-    const exact = strong.match_quality === 'exact';
-    const q = exact ? 'exacte match' : 'waarschijnlijke match';
-    if (gStatus === 'OPERATIONAL') add('G1_operational', exact ? 30 : 20, `Google Places: open — ${q}.`, 'google', [strong]);
-    if (gStatus === 'CLOSED_TEMPORARILY') add('G1_temp_closed', -10, `Google Places: tijdelijk gesloten — ${q}.`, 'google', [strong]);
-    if (gStatus === 'CLOSED_PERMANENTLY') add('G1_closed', exact ? -45 : -35, `Google Places: definitief gesloten — ${q}.`, 'google', [strong]);
-    const sameRun = ev.filter((e) => e.source === 'google_places' && e.retrieved_at === strong.retrieved_at);
-    const hours = sameRun.find((e) => e.evidence_type === 'opening_hours');
-    if (hours && gStatus === 'OPERATIONAL') add('G2_hours', 5, 'Google Places: openingsuren vermeld.', 'google', [hours]);
+    const d = strong.match_details ?? {};
+    const how = d.phoneMatch ? 'herkend aan het telefoonnummer' : d.domainMatch ? 'herkend aan de website' : 'zelfde naam en adres';
+    const elsewhere = !(d.streetMatch && d.numberMatch);
+    if (gStatus === 'OPERATIONAL') add('G1_operational', strong.match_quality === 'exact' ? 30 : 20, `Google toont de zaak als open (${how}).`, 'google', [strong]);
+    if (gStatus === 'CLOSED_TEMPORARILY') add('G1_temp_closed', -10, `Google meldt de zaak tijdelijk gesloten (${how}).`, 'google', [strong]);
+    if (gStatus === 'CLOSED_PERMANENTLY') add('G1_closed', strong.match_quality === 'exact' ? -45 : -35, `Google meldt de zaak definitief gesloten (${how}).`, 'google', [strong]);
+    const hours = run.find((e) => e.evidence_type === 'opening_hours');
+    if (hours && gStatus === 'OPERATIONAL') add('G2_hours', 5, 'Google vermeldt openingsuren.', 'google', [hours]);
     const ratings = Number(strong.value?.user_rating_count ?? 0);
-    if (ratings >= 10 && gStatus === 'OPERATIONAL') add('G3_reviews', 3, `Google Places: ${ratings} beoordelingen (publiek bekend).`, 'google', [strong]);
+    if (ratings >= 10 && gStatus === 'OPERATIONAL') add('G3_reviews', 3, `Klanten gaven ${ratings} beoordelingen op Google.`, 'google', [strong]);
+    const addr = run.find((e) => e.evidence_type === 'address');
+    if (elsewhere && addr) add('G4_other_address', 0, `Let op: Google vermeldt een ander adres (${addr.value?.address}). Mogelijk klopt het adres in het register niet.`, 'none', [addr], 'conflict');
   }
 
   // ---------------- Jaarrekening.be ----------------
@@ -119,16 +134,16 @@ export function analyze(input: AnalysisInput): AnalysisResult {
   const currentYear = today.getFullYear();
   if (acc) {
     const y = acc.value?.latest_year as number | null;
-    if (acc.value?.end_date) add('A0_end_date', -40, `Jaarrekening.be: einddatum onderneming ${String(acc.value.end_date).slice(0, 10)}.`, 'accounts', [acc]);
-    if (y && y >= currentYear - 2) add('A1_recent_accounts', 15, `Recente jaarrekening (boekjaar ${y}).`, 'accounts', [acc]);
-    else if (y && y === currentYear - 3) add('A1_older_accounts', 0, `Laatste jaarrekening boekjaar ${y}: niet recent.`, 'accounts', [acc], 'uncertainty');
-    else if (y) add('A1_old_accounts', -20, `Laatste jaarrekening al van boekjaar ${y}.`, 'accounts', [acc]);
-    else if (input.enterprise_entity_type === 'legal_person') add('A1_no_accounts', -10, 'Geen jaarrekeningen gevonden voor deze rechtspersoon.', 'accounts', [acc]);
-    if (Number(acc.value?.employees) > 0) add('A2_employees', 5, `Werknemers volgens laatste jaarrekening: ${acc.value.employees} VTE.`, 'accounts', [acc]);
+    if (acc.value?.end_date) add('A0_end_date', -40, `De onderneming is stopgezet op ${String(acc.value.end_date).slice(0, 10)}.`, 'accounts', [acc]);
+    if (y && y >= currentYear - 2) add('A1_recent_accounts', 15, `Er is een recente jaarrekening (${y}).`, 'accounts', [acc]);
+    else if (y && y === currentYear - 3) add('A1_older_accounts', 0, `De laatste jaarrekening is van ${y}.`, 'accounts', [acc], 'uncertainty');
+    else if (y) add('A1_old_accounts', -20, `De laatste jaarrekening is al van ${y}.`, 'accounts', [acc]);
+    else if (input.enterprise_entity_type === 'legal_person') add('A1_no_accounts', -10, 'Er zijn geen jaarrekeningen neergelegd.', 'accounts', [acc]);
+    if (Number(acc.value?.employees) > 0) add('A2_employees', 5, `De onderneming heeft werknemers (${acc.value.employees}).`, 'accounts', [acc]);
     // Jaarrekening zegt iets over de onderneming, niet over deze fysieke vestiging.
-    if (input.subject_type === 'establishment') add('A3_scope', 0, 'Let op: jaarrekening gaat over de onderneming, niet specifiek over deze vestiging.', 'none', [], 'info');
+    if (input.subject_type === 'establishment') add('A3_scope', 0, 'De jaarrekening gaat over de hele onderneming, niet enkel over deze plaats.', 'none', [], 'info');
   } else if (accError) {
-    add('A0_unavailable', 0, accError.summary_nl, 'none', [accError], 'uncertainty');
+    add('A0_unavailable', 0, 'De jaarrekening kon niet opgehaald worden.', 'none', [accError], 'uncertainty');
   }
   const pub = latest(ev.filter((e) => e.source === 'jaarrekening' && e.evidence_type === 'publication'));
   if (pub?.observed_at) {
@@ -145,18 +160,40 @@ export function analyze(input: AnalysisInput): AnalysisResult {
   const reachable = runChecks.find((e) => e.value?.outcome === 'reachable' || e.value?.outcome === 'blocked');
   const closedSig = runChecks.find((e) => e.value?.outcome === 'closed_signal');
   const deadDomain = runChecks.find((e) => e.value?.outcome === 'domain_not_found');
-  if (closedSig) add('W1_closed_signal', -10, closedSig.summary_nl, 'website', [closedSig]);
-  else if (reachable) add('W1_reachable', reachable.value?.mentions_local ? 8 : 4, reachable.summary_nl, 'website', [reachable]);
-  else if (deadDomain) add('W1_dead_domain', -8, deadDomain.summary_nl, 'website', [deadDomain]);
+  if (closedSig) add('W1_closed_signal', -10, 'De website meldt dat de zaak gesloten is of te koop staat.', 'website', [closedSig]);
+  else if (reachable) add('W1_reachable', reachable.value?.mentions_local ? 8 : 4, reachable.value?.mentions_local ? 'De website werkt en vermeldt de gemeente.' : 'De website werkt.', 'website', [reachable]);
+  else if (deadDomain) add('W1_dead_domain', -8, 'De website bestaat niet meer.', 'website', [deadDomain]);
+
+  // Eenmanszaak zonder enige publieke vermelding: vaak activiteit aan huis of in bijberoep.
+  if (input.enterprise_entity_type === 'natural_person' && googleChecked && !strong && !reachable) {
+    add('H1_home_based', 0, 'Zelfstandige zonder publieke vermelding: mogelijk werkt die aan huis of in bijberoep. Een telefoontje of bezoek geeft zekerheid.', 'none', [], 'uncertainty');
+  }
+
+  // ---------------- Bevestiging door de gemeente ----------------
+  const officerRows = ev.filter((e) => e.source === 'officer' && e.evidence_type === 'business_status');
+  const lastOfficer = officerRows.length ? latest(officerRows) : undefined;
+  let officerConfirmed = false;
+  if (lastOfficer?.value?.action === 'confirm_active') {
+    const when = lastOfficer.retrieved_at.slice(0, 10);
+    const how = lastOfficer.value?.method ? ` (${lastOfficer.value.method})` : '';
+    const age = yearsAgo(lastOfficer.retrieved_at, today)!;
+    if (age <= 1) {
+      officerConfirmed = true;
+      add('O1_confirmed_active', 40, `Bevestigd als actief door de gemeente op ${when.split('-').reverse().join('/')}${how}.`, 'none', [lastOfficer], 'supports_active');
+    } else {
+      add('O1_confirmation_expired', 0, `De bevestiging door de gemeente is ouder dan een jaar (${when}): best opnieuw nagaan.`, 'none', [lastOfficer], 'uncertainty');
+    }
+  }
 
   // ---------------- Score, label, zekerheid, voorstel ----------------
   const total = reasons.reduce((s, r) => s + r.points, 0);
-  const score = Math.max(0, Math.min(100, 50 + total));
-  const label: ActivityLabel = score >= 80 ? 'active' : score >= 60 ? 'likely_active' : score > 40 ? 'uncertain' : score > 20 ? 'likely_inactive' : 'inactive';
+  const score = officerConfirmed ? Math.max(90, Math.min(100, 50 + total)) : Math.max(0, Math.min(100, 50 + total));
+  const label: ActivityLabel = officerConfirmed ? 'active' : score >= 80 ? 'active' : score >= 60 ? 'likely_active' : score > 40 ? 'uncertain' : score > 20 ? 'likely_inactive' : 'inactive';
 
   const legalInactive = ['bankruptcy', 'liquidation', 'dissolved'].includes(legal);
   const conflict = (legalInactive && gStatus === 'OPERATIONAL') || (!legalInactive && legal === 'normal' && gStatus === 'CLOSED_PERMANENTLY') || !!legalConflict;
-  if (conflict) add('C1_conflict', 0, 'Bronnen spreken elkaar tegen — manuele controle nodig.', 'none', [], 'conflict');
+  if (officerConfirmed && legalInactive) add('C2_confirmed_but_register', 0, 'Let op: het register meldt nog steeds een stopzetting of faillissement. Mogelijk werkt er een nieuwe uitbater onder een ander ondernemingsnummer.', 'none', [], 'conflict');
+  if (conflict && !officerConfirmed) add('C1_conflict', 0, 'De bronnen spreken elkaar tegen: best even nakijken.', 'none', [], 'conflict');
 
   // Sterke externe bronnen (buiten het register) die een richting aangeven.
   const strongFamilies = new Map<string, number>();
@@ -167,14 +204,16 @@ export function analyze(input: AnalysisInput): AnalysisResult {
   const external = [...strongFamilies].filter(([f]) => f !== 'register');
   const directions = new Set([...strongFamilies.values()].map((p) => Math.sign(p)));
   let confidence: Confidence;
-  if (conflict || input.enterprise_completeness === 'number_only') confidence = 'LOW';
+  if (officerConfirmed) confidence = 'HIGH';
+  else if (conflict || input.enterprise_completeness === 'number_only') confidence = 'LOW';
   else if (external.length >= 2 && directions.size === 1) confidence = 'HIGH';
   else if (external.length >= 1 && directions.size === 1 && (strongFamilies.has('register') || Math.abs(external[0][1]) >= 25)) confidence = score >= 80 || score <= 20 ? 'HIGH' : 'MEDIUM';
   else if (external.length >= 1 || strongFamilies.has('register')) confidence = 'MEDIUM';
   else confidence = 'LOW';
 
   let proposed: ProposedStatus;
-  if (conflict) proposed = 'conflict_manual_check';
+  if (officerConfirmed) proposed = 'active_likely';
+  else if (conflict) proposed = 'conflict_manual_check';
   else if (gStatus === 'CLOSED_TEMPORARILY') proposed = 'temporarily_closed';
   else if (label === 'active' || label === 'likely_active') proposed = 'active_likely';
   else if (label === 'inactive' || label === 'likely_inactive') proposed = 'possibly_inactive';
@@ -182,7 +221,9 @@ export function analyze(input: AnalysisInput): AnalysisResult {
   else proposed = 'insufficient_evidence';
 
   const top = [...reasons].filter((r) => Math.abs(r.points) >= 8).sort((a, b) => Math.abs(b.points) - Math.abs(a.points)).slice(0, 2).map((r) => r.text_nl.replace(/\.$/, ''));
-  const summary = conflict
+  const summary = officerConfirmed
+    ? `Actief — bevestigd door de gemeente.`
+    : conflict
     ? `Conflict tussen bronnen (score ${score}/100). ${legalInactive ? `Register: ${LEGAL_STATUS_NL[legal]}` : 'Register zonder stopzetting'}, maar Google ${gStatus === 'OPERATIONAL' ? 'toont open' : 'meldt gesloten'}. Controleer manueel.`
     : `${LABEL_NL[label]} (score ${score}/100, zekerheid ${({ HIGH: 'hoog', MEDIUM: 'middel', LOW: 'laag' } as const)[confidence]})${top.length ? ` — vooral: ${top.join('; ')}` : ' — nog geen doorslaggevend bewijs'}.`;
 
