@@ -1,0 +1,61 @@
+services:
+  db:
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+    environment:
+      POSTGRES_DB: real_businesses
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: local-dev-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d real_businesses"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://app:local-dev-only@db:5432/real_businesses
+      PGSSLMODE: disable
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "node scripts/ingest-vkbo.js Schoten Paalstraat && node scripts/seed-demo-mocks.js Schoten Paalstraat && node scripts/beoordeel-straat.js Schoten Paalstraat"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://app:local-dev-only@db:5432/real_businesses
+      PGSSLMODE: disable
+      PORT: 3000
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    command: ["node", "server/index.js"]
+
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_URL: http://localhost:3000
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "5173:5173"
+
+volumes:
+  postgres_data:

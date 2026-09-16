@@ -1,0 +1,25 @@
+{
+  "name": "find-the-real-businesses",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Ingest-pipeline en Supabase-datamodel voor de Provincie Antwerpen hackathon-challenge 'Find the Real Businesses'.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "docker compose up --build",
+    "dev:down": "docker compose down",
+    "dev:reset": "docker compose down -v",
+    "ingest": "node --env-file=.env scripts/ingest-vkbo.js",
+    "beoordeel": "node --env-file=.env scripts/beoordeel-straat.js",
+    "demo-data": "node --env-file=.env scripts/seed-demo-mocks.js",
+    "verrijk": "node --env-file=.env scripts/verrijk-google-places.js",
+    "serve": "node --env-file=.env server/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "pg": "^8.23.0"
+  }
+}
