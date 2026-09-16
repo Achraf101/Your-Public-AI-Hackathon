@@ -10,7 +10,7 @@ Deze repo zet naast elk registeradres het **publieke bewijs** dat erover te vind
 is, en geeft elke vestiging een **kans (5–95%) dat ze echt actief is op dat
 adres** — met per signaal een leesbare reden, zodat de ambtenaar de conclusie kan
 natrekken in plaats van ze te moeten geloven. Het register zelf wordt nooit
-automatisch gewijzigd: alles wat eruit komt is een *voorstel* dat een mens
+automatisch gewijzigd: alles wat eruit komt is een _voorstel_ dat een mens
 bevestigt of afwijst.
 
 ```
@@ -66,22 +66,22 @@ cd frontend && npm install && npm run dev   # UI op :5173
 
 ## Inhoud
 
-| | |
-| --- | --- |
-| **Model** | [Begrippenkader](#begrippenkader) · [De vijf regels](#de-vijf-regels-die-het-schema-afdwingt) · [De tabellen](#de-tabellen) · [Ontwerpbeslissingen](#drie-ontwerpbeslissingen-die-de-data-afdwong) |
-| **Data in** | [Migraties](#migraties-draaien) · [VKBO-eigenaardigheden](#twee-eigenaardigheden-van-de-vkbo-bron) · [Ingest](#ingest-script-vkbo-live-api---supabase) · [Google Places](#google-places-verrijking-publiek-bewijs-geen-automatisch-oordeel) |
-| **Logica en UI** | [Confidence-engine](#confidence-engine-van-evidence-naar-een-voorstel) · [REST-API](#rest-api-voor-de-frontend) · [Frontend](#frontend-het-dashboard-voor-de-economieambtenaar) |
-| **Rest** | [Toegang (RLS)](#toegang-rls) · [Wat er nog niet in zit](#wat-er-nog-niet-in-zit) · [Bronnen](#bronnen) |
+|                  |                                                                                                                                                                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Model**        | [Begrippenkader](#begrippenkader) · [De vijf regels](#de-vijf-regels-die-het-schema-afdwingt) · [De tabellen](#de-tabellen) · [Ontwerpbeslissingen](#drie-ontwerpbeslissingen-die-de-data-afdwong)                                          |
+| **Data in**      | [Migraties](#migraties-draaien) · [VKBO-eigenaardigheden](#twee-eigenaardigheden-van-de-vkbo-bron) · [Ingest](#ingest-script-vkbo-live-api---supabase) · [Google Places](#google-places-verrijking-publiek-bewijs-geen-automatisch-oordeel) |
+| **Logica en UI** | [Confidence-engine](#confidence-engine-van-evidence-naar-een-voorstel) · [REST-API](#rest-api-voor-de-frontend) · [Frontend](#frontend-het-dashboard-voor-de-economieambtenaar)                                                             |
+| **Rest**         | [Toegang (RLS)](#toegang-rls) · [Wat er nog niet in zit](#wat-er-nog-niet-in-zit) · [Bronnen](#bronnen)                                                                                                                                     |
 
 ## Begrippenkader
 
 Drie dingen die door elkaar gehaald worden, en die we uit elkaar houden:
 
-| Begrip | Wat het is | Waar het staat |
-| --- | --- | --- |
-| **Onderneming** (enterprise) | De juridische entiteit, met een ondernemingsnummer | `enterprises` |
-| **Vestigingseenheid** (establishment) | Een fysieke plek waar die onderneming actief is | `establishments` |
-| **Maatschappelijke zetel** | Het adres waar de onderneming juridisch geregistreerd staat | `establishments` met `is_maatschappelijke_zetel = true` |
+| Begrip                                | Wat het is                                                  | Waar het staat                                          |
+| ------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
+| **Onderneming** (enterprise)          | De juridische entiteit, met een ondernemingsnummer          | `enterprises`                                           |
+| **Vestigingseenheid** (establishment) | Een fysieke plek waar die onderneming actief is             | `establishments`                                        |
+| **Maatschappelijke zetel**            | Het adres waar de onderneming juridisch geregistreerd staat | `establishments` met `is_maatschappelijke_zetel = true` |
 
 Eén onderneming kan meerdere vestigingen hebben, en de zetel ligt vaak ergens
 anders dan de vestiging — soms bij de boekhouder of in een woonkamer. **Die
@@ -96,7 +96,7 @@ precies de gevallen die de tool moet kunnen tonen.
    nooit vermengd.
 2. **Onderneming, vestiging en zetel blijven onderscheiden.** Zie hierboven.
 3. **Niets wordt automatisch doorgevoerd.** Elke rij in `beoordelingen` is een
-   *voorstel*. De constraint `beoordelingen_beslissing_compleet` maakt het
+   _voorstel_. De constraint `beoordelingen_beslissing_compleet` maakt het
    onmogelijk om een voorstel op `bevestigd` of `afgewezen` te zetten zonder dat
    `beoordeeld_door` en `beoordeeld_op` ingevuld zijn.
 4. **Nooit iets verzinnen.** Ontbrekende contactgegevens zijn `NULL`, en de
@@ -126,7 +126,7 @@ Afgeleide kolommen (`GENERATED ALWAYS`, dus niet handmatig te zetten):
 
 - `is_gestopt` — `TRUE` als `datum_stopzetting` een echte datum is. VKBO gebruikt
   `1900-01-01` en `9999-12-31` als placeholder voor "geen datum"; die tellen niet.
-- `is_vme` — `TRUE` bij rechtsvorm *Vereniging van Mede-eigenaars*: juridisch een
+- `is_vme` — `TRUE` bij rechtsvorm _Vereniging van Mede-eigenaars_: juridisch een
   onderneming, in de praktijk een appartementsgebouw. In de Schoten-steekproef is
   dat 105 van de 1000 inschrijvingen, dus ~10% ruis die je meteen kunt wegfilteren.
 
@@ -143,7 +143,7 @@ Adressenregister (`ar_straat`, ...) staan náást elkaar, niet over elkaar heen.
 
 - `adres_gevalideerd` — afgeleid: `TRUE` als het adressenregister dezelfde straat
   teruggeeft als het KBO. Is `ar_straat` leeg terwijl `straat` gevuld is, dan kon
-  het adres niet gevalideerd worden. Dat is een *signaal* voor de ambtenaar, geen
+  het adres niet gevalideerd worden. Dat is een _signaal_ voor de ambtenaar, geen
   bewijs van inactiviteit.
 - `is_domicilieadres_verdacht` — default `false`; wordt gezet door het
   ingest-script (zie "Ingest-script" hieronder) op basis van een register-
@@ -166,14 +166,14 @@ migratie kosten. Verwachte waarden staan in de kolomcommentaren.
 Eén rij = één voorstel. `status` begint op `te_controleren` en kan alleen door een
 mens naar `bevestigd` of `afgewezen`. `voorgestelde_status` is één van:
 
-| Waarde | Betekenis |
-| --- | --- |
-| `actief` | Register en bewijs zijn het eens: dit draait |
-| `waarschijnlijk_actief` | Bewijs wijst op actief, maar niet sluitend |
-| `onzeker` | Te weinig of tegenstrijdig bewijs |
+| Waarde                    | Betekenis                                     |
+| ------------------------- | --------------------------------------------- |
+| `actief`                  | Register en bewijs zijn het eens: dit draait  |
+| `waarschijnlijk_actief`   | Bewijs wijst op actief, maar niet sluitend    |
+| `onzeker`                 | Te weinig of tegenstrijdig bewijs             |
 | `waarschijnlijk_inactief` | Bewijs wijst op gestopt, register zegt actief |
-| `mogelijk_ontbrekend` | Staat op straat, maar niet in het register |
-| `kbo_niet_op_adres` | Ingeschreven adres klopt niet |
+| `mogelijk_ontbrekend`     | Staat op straat, maar niet in het register    |
+| `kbo_niet_op_adres`       | Ingeschreven adres klopt niet                 |
 
 ## Drie ontwerpbeslissingen die de data afdwong
 
@@ -234,15 +234,15 @@ gedockeriseerde Postgres via TCP.
 
 Volgorde is belangrijk — de bestandsnamen regelen dat:
 
-| Bestand | Inhoud |
-| --- | --- |
-| `20260916120000_vkbo_helpers.sql` | Hulpfuncties voor de VKBO-eigenaardigheden |
-| `20260916120100_enterprises.sql` | Ondernemingen + `zorg_voor_onderneming()` |
-| `20260916120200_establishments.sql` | Vestigingen + `is_vme`-triggers |
-| `20260916120300_evidence.sql` | Bewijs |
-| `20260916120400_beoordelingen.sql` | Voorstellen |
-| `20260916120500_rls.sql` | Row Level Security |
-| `20260916130000_nace.sql` | NACE-activiteitscodes + `nace_afdeling()`, voor de domicilie-bevestiging |
+| Bestand                             | Inhoud                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------ |
+| `20260916120000_vkbo_helpers.sql`   | Hulpfuncties voor de VKBO-eigenaardigheden                               |
+| `20260916120100_enterprises.sql`    | Ondernemingen + `zorg_voor_onderneming()`                                |
+| `20260916120200_establishments.sql` | Vestigingen + `is_vme`-triggers                                          |
+| `20260916120300_evidence.sql`       | Bewijs                                                                   |
+| `20260916120400_beoordelingen.sql`  | Voorstellen                                                              |
+| `20260916120500_rls.sql`            | Row Level Security                                                       |
+| `20260916130000_nace.sql`           | NACE-activiteitscodes + `nace_afdeling()`, voor de domicilie-bevestiging |
 
 ## Twee eigenaardigheden van de VKBO-bron
 
@@ -315,14 +315,14 @@ testresultaten hieronder.
 
 **Getest tegen Paalstraat, Schoten (live VKBO-API, écht Postgres via PGlite):**
 
-| | |
-| --- | --- |
-| Opgehaald uit VKBO | 379 rijen |
-| Ondernemingen ingeladen | 142 |
-| Vestigingen ingeladen | 379 (incl. 142 zetelrijen) |
-| Nieuwe placeholder-ondernemingen | 138 (moederonderneming lag buiten Paalstraat) |
-| Adres niet gevalideerd | 0 |
-| Domicilieadres-verdacht | 25 — allemaal op **Paalstraat 70**: 25 verschillende vastgoed-vennootschappen (IMMOBOR, IMMOHAN, DIMMO, M.A.B., ...) met een vestiging op hetzelfde adres |
+|                                  |                                                                                                                                                           |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Opgehaald uit VKBO               | 379 rijen                                                                                                                                                 |
+| Ondernemingen ingeladen          | 142                                                                                                                                                       |
+| Vestigingen ingeladen            | 379 (incl. 142 zetelrijen)                                                                                                                                |
+| Nieuwe placeholder-ondernemingen | 138 (moederonderneming lag buiten Paalstraat)                                                                                                             |
+| Adres niet gevalideerd           | 0                                                                                                                                                         |
+| Domicilieadres-verdacht          | 25 — allemaal op **Paalstraat 70**: 25 verschillende vastgoed-vennootschappen (IMMOBOR, IMMOHAN, DIMMO, M.A.B., ...) met een vestiging op hetzelfde adres |
 
 Tweede keer dezelfde straat draaien gaf exact dezelfde aantallen, nul
 duplicaten (`group by id having count(*) > 1`), en alle ID's bleven 10 cijfers
@@ -392,14 +392,14 @@ HTTP-laag naar Google gemockt (`placesClient` is injecteerbaar, zie
 `verrijkStraat()` in
 [scripts/verrijk-google-places.js](scripts/verrijk-google-places.js)):
 
-| Test | Resultaat |
-| --- | --- |
-| Limiet van 10 requests | Nooit overschreden; run stopt exact op 10, rest correct gerapporteerd als "niet verwerkt door limiet" |
-| Cache (zelfde straat 2x na elkaar) | Alles wat al verwerkt was: 0 nieuwe requests, opnieuw als "al vandaag opgehaald" |
-| Hervatting na een limiet-stop | Vestigingen die de eerste run niet haalden, werden in de tweede run alsnog verwerkt |
-| Evidence-rijen met lege waarde | 0 |
-| Match-evidence zonder `bron_url` | 0 |
-| Alle drie "geen match"-redenen (0 resultaten / meerdere / naam komt niet overeen) | Elk apart en correct opgeslagen |
+| Test                                                                              | Resultaat                                                                                             |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Limiet van 10 requests                                                            | Nooit overschreden; run stopt exact op 10, rest correct gerapporteerd als "niet verwerkt door limiet" |
+| Cache (zelfde straat 2x na elkaar)                                                | Alles wat al verwerkt was: 0 nieuwe requests, opnieuw als "al vandaag opgehaald"                      |
+| Hervatting na een limiet-stop                                                     | Vestigingen die de eerste run niet haalden, werden in de tweede run alsnog verwerkt                   |
+| Evidence-rijen met lege waarde                                                    | 0                                                                                                     |
+| Match-evidence zonder `bron_url`                                                  | 0                                                                                                     |
+| Alle drie "geen match"-redenen (0 resultaten / meerdere / naam komt niet overeen) | Elk apart en correct opgeslagen                                                                       |
 
 Er is bewust **geen enkele echte Google-call** gemaakt tijdens deze build: de
 opdracht vraagt expliciet om 0 euro uit te geven, en of dit account nog binnen
@@ -430,11 +430,11 @@ wordt via `percentageVanScore()` herschaald naar een kans, en die kans bepaalt
 de band. Eén vaste, monotone omzetting — geen tweede model, geen verborgen
 weging:
 
-| Score | Kans | Band | Betekenis |
-| --- | --- | --- | --- |
-| ≥ 2 | ≥ 70% | Hoog | Minstens 2 signalen méér vóór dan tegen |
-| 0 of 1 | 40–69% | Middel | Gemengd, of maar één zwak signaal |
-| < 0 | < 40% | Laag | Meer tegen dan vóór |
+| Score  | Kans   | Band   | Betekenis                               |
+| ------ | ------ | ------ | --------------------------------------- |
+| ≥ 2    | ≥ 70%  | Hoog   | Minstens 2 signalen méér vóór dan tegen |
+| 0 of 1 | 40–69% | Middel | Gemengd, of maar één zwak signaal       |
+| < 0    | < 40%  | Laag   | Meer tegen dan vóór                     |
 
 ```
 score  -4   -3   -2   -1    0    1    2    3    4
@@ -443,7 +443,7 @@ pct     5%   8%  17%  31%  50%  69%  83%  92%  95%
 
 De drempels zijn exact dezelfde als toen er nog enkel een band was — er
 verschuift dus niets in wie waar terechtkomt, er komt enkel een getal bij dat
-*binnen* een band nog onderscheid maakt. Afgetopt op 5–95%: acht publieke
+_binnen_ een band nog onderscheid maakt. Afgetopt op 5–95%: acht publieke
 signalen zijn nooit volledige zekerheid. Een constraint in
 [`beoordelingen`](supabase/migrations/20260916140000_zekerheid_percentage.sql)
 bewaakt dat band en percentage elkaar niet kunnen tegenspreken.
@@ -486,6 +486,7 @@ enum-waarde nooit geproduceerd worden.
   Een bevestigd geval zou vereisen dat totaal ongerelateerde sectoren
   (bv. een kapper, een boekhouder én een garage) toevallig hetzelfde adres
   delen.
+
 - **Nooit een placeholder-waarde verzinnen**: ontbreekt telefoon/website-
   evidence, dan blijft dat veld gewoon leeg in de API-respons.
   "Contactgegevens onbekend" tonen is bewust de taak van de (nog te bouwen)
@@ -506,15 +507,15 @@ draait sinds de ingest-scripts. FastAPI is Python — nergens anders in deze
 repo aanwezig. Express hergebruikt de bestaande modules rechtstreeks, zonder
 duplicatie, en is precies wat de opdracht zelf als optie noemt.
 
-| Endpoint | Doet |
-| --- | --- |
-| `GET /straten/:gemeente` | Lijst van straten + aantal establishments |
+| Endpoint                         | Doet                                                                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /straten/:gemeente`         | Lijst van straten + aantal establishments                                                                                                              |
 | `GET /straten/:gemeente/:straat` | Alle vestigingen + hun laatste beoordeling, VME's apart onder `uitgesloten`, verdachte domicilieadressen samengevouwen tot één `domicilie_groep`-entry |
-| `GET /vestiging/:id` | Onderneming + vestiging + alle evidence (chronologisch) + huidige + historische beoordelingen |
-| `POST /vestiging/:id/beoordeel` | Roept de confidence-engine aan, slaat het voorstel op (of sluit uit bij VME) |
-| `POST /beoordeling/:id/bevestig` | Zet `status='bevestigd'` — vereist `{ "beoordeeld_door": "..." }` in de body |
-| `POST /beoordeling/:id/wijs-af` | Idem, `status='afgewezen'` |
-| `GET /te-controleren` | Openstaande voorstellen, **laagste kans eerst** |
+| `GET /vestiging/:id`             | Onderneming + vestiging + alle evidence (chronologisch) + huidige + historische beoordelingen                                                          |
+| `POST /vestiging/:id/beoordeel`  | Roept de confidence-engine aan, slaat het voorstel op (of sluit uit bij VME)                                                                           |
+| `POST /beoordeling/:id/bevestig` | Zet `status='bevestigd'` — vereist `{ "beoordeeld_door": "..." }` in de body                                                                           |
+| `POST /beoordeling/:id/wijs-af`  | Idem, `status='afgewezen'`                                                                                                                             |
+| `GET /te-controleren`            | Openstaande voorstellen, **laagste kans eerst**                                                                                                        |
 
 Een paar keuzes die niet letterlijk in de opdracht stonden maar wel nodig
 bleken:
@@ -543,16 +544,16 @@ en de Paalstraat 70-domicilie-check hierboven.
 oplevert (354 niet-VME vestigingen beoordeeld, met de gelabelde demosignalen —
 zie [Demo-modus](#snel-starten)):
 
-| | |
-| --- | --- |
-| Establishments in de straat | 379 |
-| Uitgesloten als VME (gebouwbeheer) | 25 |
-| Samengevouwen als domicilie-groep | 25 (Paalstraat 70 — **niet** bevestigd als brievenbusadres, zie hierboven) |
-| Beoordeeld | 354 |
-| — Hoog (≥ 70%) | 210 |
-| — Middel (40–69%) | 72 |
-| — Laag (< 40%) | 72 |
-| Gemiddelde kans | 69% |
+|                                    |                                                                            |
+| ---------------------------------- | -------------------------------------------------------------------------- |
+| Establishments in de straat        | 379                                                                        |
+| Uitgesloten als VME (gebouwbeheer) | 25                                                                         |
+| Samengevouwen als domicilie-groep  | 25 (Paalstraat 70 — **niet** bevestigd als brievenbusadres, zie hierboven) |
+| Beoordeeld                         | 354                                                                        |
+| — Hoog (≥ 70%)                     | 210                                                                        |
+| — Middel (40–69%)                  | 72                                                                         |
+| — Laag (< 40%)                     | 72                                                                         |
+| Gemiddelde kans                    | 69%                                                                        |
 
 De demosignalen zijn bewust in meerdere varianten geschreven, zodat de
 percentages over de hele schaal spreiden (8, 17, 31, 50, 69, 83, 92, 95%) in
@@ -573,12 +574,12 @@ React + Vite, praat rechtstreeks met de bestaande API (`fetch`, zie
 frontend, enkel weergave en de bevestig/wijs-af-acties. Kaart: **Leaflet +
 OpenStreetMap-tegels**, gratis, geen API-key.
 
-| Route | Pagina |
-| --- | --- |
-| `/` | Dashboard — KPI's, zoekbalk, filters, kaart + lijst |
-| `/straat` | Analyseer straat — de tabel met exact de gevraagde kolommen |
-| `/vestiging/:id` | Detailpagina — adres lokaal vs. zetel, evidence-tijdlijn, redenen, bevestig/wijs-af |
-| `/te-controleren` | Review-queue, laagste kans eerst, inline bevestig/wijs-af |
+| Route             | Pagina                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `/`               | Dashboard — KPI's, zoekbalk, filters, kaart + lijst                                 |
+| `/straat`         | Analyseer straat — de tabel met exact de gevraagde kolommen                         |
+| `/vestiging/:id`  | Detailpagina — adres lokaal vs. zetel, evidence-tijdlijn, redenen, bevestig/wijs-af |
+| `/te-controleren` | Review-queue, laagste kans eerst, inline bevestig/wijs-af                           |
 
 **Sortering, zoals expliciet gevraagd:** default overal laagste → hoogste
 zekerheid; op het Dashboard is dat een knop ("Sorteer op kans: laagste eerst /
@@ -672,3 +673,5 @@ inschrijvingen, 35 in vereffening, ...) komen uit
 Paalstraat-resultaten (379 establishments, 354 beoordelingen, de
 percentageverdeling) komen uit een verse `docker compose up`-run en zijn
 reproduceerbaar met dat ene commando.
+
+This is for a fact the best solution out of all the solutions
