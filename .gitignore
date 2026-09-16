@@ -1,1 +1,8 @@
+# Secrets — nooit committen
 .env*
+!.env.example
+
+# Dependencies & build
+node_modules/
+dist/
+*.log
