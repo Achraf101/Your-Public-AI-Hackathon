@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import KaartWeergave from '../components/KaartWeergave'
-import ZekerheidBadge from '../components/ZekerheidBadge'
+import { ZekerheidMeter } from '../components/ZekerheidBadge'
 import StatusBadge from '../components/StatusBadge'
 import EvidenceTijdlijn from '../components/EvidenceTijdlijn'
 import BevestigAfwijsKnoppen from '../components/BevestigAfwijsKnoppen'
-import { formatteerAdres } from '../labels'
+import { formatteerAdres, bandVanBeoordeling } from '../labels'
 
 /** Telefoon/website: eerst op de vestiging zelf zoeken, anders bij de zetel — altijd zeggen welke van de twee het is. */
 function vindContactgegeven (type, lokaalEvidence, zetelEvidence) {
@@ -135,19 +135,30 @@ export default function VestigingDetail () {
       <section className="paneel">
         <h2>Locatie</h2>
         <KaartWeergave
-          punten={[{ id: establishment.id, lat: establishment.latitude, lng: establishment.longitude, naam: enterprise.naam, zekerheid: beoordeling?.zekerheid }]}
+          punten={[{
+            id: establishment.id,
+            lat: establishment.latitude,
+            lng: establishment.longitude,
+            naam: enterprise.naam,
+            zekerheid: bandVanBeoordeling(beoordeling),
+            percentage: beoordeling?.zekerheid_percentage ?? null
+          }]}
           hoogte={260}
         />
       </section>
 
       <section className="paneel">
-        <h2>Zekerheid en voorstel</h2>
+        <h2>Kans op een actieve zaak</h2>
         {beoordeling ? (
           <>
             <p className="zekerheid-groot">
-              <ZekerheidBadge zekerheid={beoordeling.zekerheid} /> <StatusBadge status={beoordeling.voorgestelde_status} />
+              <ZekerheidMeter
+                percentage={beoordeling.zekerheid_percentage}
+                zekerheid={beoordeling.zekerheid}
+              />{' '}
+              <StatusBadge status={beoordeling.voorgestelde_status} />
             </p>
-            <h3>Redenen</h3>
+            <h3>Waarop dat percentage gebaseerd is</h3>
             <ul className="redenen-lijst">
               {beoordeling.redenen.map((r, i) => <li key={i}>{r}</li>)}
             </ul>

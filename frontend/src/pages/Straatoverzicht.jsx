@@ -28,7 +28,12 @@ function VestigingRij ({ v, navigate, ingesprongen }) {
       <td>{register}</td>
       <td>{bewijs}</td>
       <td>{v.beoordeling ? formatteerDatum(v.beoordeling.aangemaakt_op) : 'Nog niet gecontroleerd'}</td>
-      <td><ZekerheidBadge zekerheid={v.beoordeling?.zekerheid} /></td>
+      <td>
+        <ZekerheidBadge
+          percentage={v.beoordeling?.zekerheid_percentage}
+          zekerheid={v.beoordeling?.zekerheid}
+        />
+      </td>
       <td><StatusBadge status={v.beoordeling?.voorgestelde_status} /></td>
     </tr>
   )
@@ -113,7 +118,7 @@ export default function Straatoverzicht () {
                   <th>Register</th>
                   <th>Bewijs van activiteit</th>
                   <th>Laatste waarneming</th>
-                  <th>Zekerheid</th>
+                  <th title="Kans dat deze zaak echt actief is op dit adres">Kans actief</th>
                   <th>Voorstel</th>
                 </tr>
               </thead>

@@ -82,6 +82,7 @@ a { color: var(--kleur-accent); }
 .straat-kiezer { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .veld { display: flex; flex-direction: column; font-size: 0.78rem; color: var(--kleur-tekst-zacht); gap: 0.25rem; }
 .veld input, .veld select { padding: 0.4rem 0.55rem; border: 1px solid var(--kleur-rand); border-radius: 4px; font-size: 0.9rem; min-width: 200px; }
+.veld__hint { font-size: 0.72rem; color: var(--kleur-tekst-zacht); }
 
 .werkbalk { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
 .zoekveld { flex: 1; min-width: 260px; padding: 0.7rem .9rem; border: 1px solid var(--kleur-rand); border-radius: 9px; font-size: .9rem; background: #fff; }
@@ -151,7 +152,7 @@ a { color: var(--kleur-accent); }
 .definitie-lijst { display: grid; grid-template-columns: 180px 1fr; gap: 0.4rem 1rem; margin: 0; }
 .definitie-lijst dt { color: var(--kleur-tekst-zacht); }
 .definitie-lijst dd { margin: 0; }
-.zekerheid-groot { display: flex; gap: 0.5rem; align-items: center; }
+.zekerheid-groot { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
 .redenen-lijst { margin: 0 0 1rem; padding-left: 1.25rem; }
 .redenen-lijst li { margin-bottom: 0.2rem; }
 
@@ -218,6 +219,18 @@ a { color: var(--kleur-accent); }
 .badge--status-kbo_niet_op_adres { background: #ffedd5; color: #c2410c; }
 .badge--status-onzeker { background: #fef3c7; color: #92400e; }
 .badge--bron-demo { background: #ede9fe; border-color: #c4b5fd; color: #6d28d9; }
+
+/* ------------------------------------------------- zekerheid als percentage */
+/* Het cijfer is de boodschap; het bandwoord staat er kleiner naast als uitleg. */
+.badge--zekerheid { display: inline-flex; align-items: baseline; gap: .3rem; }
+.badge__cijfer { font-variant-numeric: tabular-nums; font-size: .78rem; }
+.badge__band { font-size: .64rem; font-weight: 500; opacity: .75; text-transform: lowercase; }
+
+.zekerheid-meter { display: inline-flex; flex-direction: column; gap: .2rem; min-width: 190px; vertical-align: middle; }
+.zekerheid-meter__cijfer { font-size: 1.9rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.zekerheid-meter__balk { height: 7px; border-radius: 999px; background: #e9edf2; overflow: hidden; }
+.zekerheid-meter__vulling { display: block; height: 100%; border-radius: 999px; transition: width .3s ease; }
+.zekerheid-meter__label { font-size: .72rem; color: var(--kleur-tekst-zacht); }
 .leaflet-container { font-family: inherit; border: 1px solid #e4e7ec; }
 
 @media (max-width: 640px) {

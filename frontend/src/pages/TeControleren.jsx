@@ -4,7 +4,7 @@ import { api } from '../api'
 import ZekerheidBadge from '../components/ZekerheidBadge'
 import StatusBadge from '../components/StatusBadge'
 import BevestigAfwijsKnoppen from '../components/BevestigAfwijsKnoppen'
-import { ZEKERHEID_VOLGORDE, formatteerAdres, splitsRedenen } from '../labels'
+import { formatteerAdres, splitsRedenen, zekerheidSorteersleutel } from '../labels'
 
 export default function TeControleren () {
   const [beoordelingen, setBeoordelingen] = useState(null)
@@ -25,16 +25,18 @@ export default function TeControleren () {
     setBeoordelingen((lijst) => lijst.filter((b) => b.id !== id))
   }
 
+  // Laagste kans eerst — op het percentage zelf, zodat 8% vóór 31% komt en niet
+  // allebei ergens in de hoop "Laag" verdwijnt.
   const gesorteerd = beoordelingen
-    ? [...beoordelingen].sort((a, b) => (ZEKERHEID_VOLGORDE[a.zekerheid] ?? 9) - (ZEKERHEID_VOLGORDE[b.zekerheid] ?? 9))
+    ? [...beoordelingen].sort((a, b) => zekerheidSorteersleutel(a) - zekerheidSorteersleutel(b))
     : []
 
   return (
     <div className="pagina">
       <h1>Te controleren</h1>
       <p className="pagina-intro">
-        Alle openstaande voorstellen, laagste zekerheid eerst — dit is waar je als eerste naar
-        moet kijken.
+        Alle openstaande voorstellen, laagste kans op een actieve zaak eerst — dit is waar je
+        als eerste naar moet kijken.
       </p>
 
       {laden && <p>Bezig met laden…</p>}
@@ -54,7 +56,7 @@ export default function TeControleren () {
                   <div className="review-kaart__adres">{b.adres ? formatteerAdres(b.adres) : b.voorstel_tekst}</div>
                 </div>
                 <div className="review-kaart__badges">
-                  <ZekerheidBadge zekerheid={b.zekerheid} />
+                  <ZekerheidBadge percentage={b.zekerheid_percentage} zekerheid={b.zekerheid} />
                   <StatusBadge status={b.voorgestelde_status} />
                 </div>
               </div>

@@ -33,7 +33,7 @@ async function beoordeelVestiging (id) {
   const resultaat = berekenBeoordeling({ ...context, domicilieBevestiging })
   if (resultaat.uitgesloten_reden) return { uitgesloten: true }
   const beoordeling = await schrijfBeoordeling(pool, { establishmentId: id, resultaat })
-  return { uitgesloten: false, zekerheid: beoordeling.zekerheid }
+  return { uitgesloten: false, zekerheid: beoordeling.zekerheid, percentage: beoordeling.zekerheid_percentage }
 }
 
 try {
@@ -44,12 +44,21 @@ try {
     [gemeente, straat]
   )
   const telling = { Hoog: 0, Middel: 0, Laag: 0, uitgesloten: 0 }
+  const percentages = []
   for (const { id } of rows) {
     const resultaat = await beoordeelVestiging(id)
-    if (resultaat.uitgesloten) telling.uitgesloten++
-    else telling[resultaat.zekerheid]++
+    if (resultaat.uitgesloten) {
+      telling.uitgesloten++
+    } else {
+      telling[resultaat.zekerheid]++
+      percentages.push(resultaat.percentage)
+    }
   }
-  console.log(`Beoordelingen voor ${gemeente} / ${straat}: ${telling.Hoog} Hoog, ${telling.Middel} Middel, ${telling.Laag} Laag, ${telling.uitgesloten} VME uitgesloten.`)
+  const gemiddelde = percentages.length > 0
+    ? Math.round(percentages.reduce((a, b) => a + b, 0) / percentages.length)
+    : null
+  console.log(`Beoordelingen voor ${gemeente} / ${straat}: ${telling.Hoog} Hoog (≥70%), ${telling.Middel} Middel (40-69%), ${telling.Laag} Laag (<40%), ${telling.uitgesloten} VME uitgesloten.`)
+  if (gemiddelde !== null) console.log(`Gemiddelde kans dat een zaak echt actief is: ${gemiddelde}%.`)
 } finally {
   await pool.end()
 }

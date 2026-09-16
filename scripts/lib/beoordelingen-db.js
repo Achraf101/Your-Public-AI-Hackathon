@@ -105,19 +105,20 @@ export async function schrijfBeoordeling (db, { establishmentId, resultaat }) {
   if (bestaand.rows.length > 0) {
     const r = await db.query(
       `update beoordelingen
-       set zekerheid = $2, redenen = $3::jsonb, voorgestelde_status = $4, voorstel_tekst = $5, aangemaakt_op = now()
+       set zekerheid = $2, zekerheid_percentage = $3, redenen = $4::jsonb,
+           voorgestelde_status = $5, voorstel_tekst = $6, aangemaakt_op = now()
        where id = $1
        returning *`,
-      [bestaand.rows[0].id, resultaat.zekerheid, JSON.stringify(resultaat.redenen), resultaat.voorgestelde_status, resultaat.voorstel_tekst]
+      [bestaand.rows[0].id, resultaat.zekerheid, resultaat.zekerheid_percentage, JSON.stringify(resultaat.redenen), resultaat.voorgestelde_status, resultaat.voorstel_tekst]
     )
     return r.rows[0]
   }
 
   const r = await db.query(
-    `insert into beoordelingen (establishment_id, zekerheid, redenen, voorgestelde_status, voorstel_tekst)
-     values ($1, $2, $3::jsonb, $4, $5)
+    `insert into beoordelingen (establishment_id, zekerheid, zekerheid_percentage, redenen, voorgestelde_status, voorstel_tekst)
+     values ($1, $2, $3, $4::jsonb, $5, $6)
      returning *`,
-    [establishmentId, resultaat.zekerheid, JSON.stringify(resultaat.redenen), resultaat.voorgestelde_status, resultaat.voorstel_tekst]
+    [establishmentId, resultaat.zekerheid, resultaat.zekerheid_percentage, JSON.stringify(resultaat.redenen), resultaat.voorgestelde_status, resultaat.voorstel_tekst]
   )
   return r.rows[0]
 }
@@ -148,7 +149,11 @@ export async function beslisOverBeoordeling (db, { id, beslissing, beoordeeldDoo
   return r.rows[0] ?? null
 }
 
-/** Alle openstaande voorstellen, Laag eerst (dat is wat de meeste aandacht vraagt). */
+/**
+ * Alle openstaande voorstellen, laagste kans eerst (dat is wat de meeste
+ * aandacht vraagt). Sorteert op zekerheid_percentage en niet meer op de band:
+ * binnen "Laag" is 8% dringender dan 31%.
+ */
 export async function haalTeControleren (db) {
   const r = await db.query(
     `select b.*, e.straat, e.huisnr, e.postcode, e.gemeente,
@@ -157,7 +162,7 @@ export async function haalTeControleren (db) {
      left join establishments e on e.id = b.establishment_id
      left join enterprises ent on ent.id = e.enterprise_id
      where b.status = 'te_controleren'
-     order by case b.zekerheid when 'Laag' then 0 when 'Middel' then 1 when 'Hoog' then 2 else 3 end,
+     order by b.zekerheid_percentage asc nulls first,
               b.aangemaakt_op asc`
   )
   return r.rows
@@ -190,7 +195,8 @@ export async function haalEstablishmentsVoorStraat (db, { gemeente, straat }) {
        ent.is_gestopt as enterprise_is_gestopt,
        nace_afdeling(e.nace_code_rsz) as nace_afdeling_rsz,
        nace_afdeling(ent.nace_code_btw) as nace_afdeling_btw,
-       b.id as beoordeling_id, b.zekerheid, b.voorgestelde_status, b.status as beoordeling_status,
+       b.id as beoordeling_id, b.zekerheid, b.zekerheid_percentage,
+       b.voorgestelde_status, b.status as beoordeling_status,
        b.redenen, b.aangemaakt_op as beoordeling_aangemaakt_op
      from establishments e
      join enterprises ent on ent.id = e.enterprise_id

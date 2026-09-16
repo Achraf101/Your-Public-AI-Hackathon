@@ -1,14 +1,77 @@
-# Find the Real Businesses — datamodel
+# Find the Real Businesses
 
 Prototype voor de challenge van Provincie Antwerpen. Een lokale economieambtenaar
 weet niet altijd welke bedrijven écht actief zijn op straat: het KBO toont zaken
 die al jaren gestopt zijn als "actief", en mist soms winkels die duidelijk open
-zijn. Eén gemeente van 20.000 inwoners heeft 33.000 registerinschrijvingen.
+zijn. Eén gemeente van 20.000 inwoners heeft 33.000 registerinschrijvingen — die
+kan niemand één voor één gaan natrekken.
 
-Deze repo bevat het Supabase-datamodel ([supabase/migrations/](supabase/migrations/))
-en een ingest-script dat de VKBO live API naar dat model wegschrijft
-([scripts/](scripts/)). Er is nog geen frontend en nog geen koppeling met
-Google Places of NBB.
+Deze repo zet naast elk registeradres het **publieke bewijs** dat erover te vinden
+is, en geeft elke vestiging een **kans (5–95%) dat ze echt actief is op dat
+adres** — met per signaal een leesbare reden, zodat de ambtenaar de conclusie kan
+natrekken in plaats van ze te moeten geloven. Het register zelf wordt nooit
+automatisch gewijzigd: alles wat eruit komt is een *voorstel* dat een mens
+bevestigt of afwijst.
+
+```
+  VKBO live API ──┐                            ┌─► kans in % + redenen
+                  ├─► ingest ──► Postgres ─────┤
+  Google Places ──┘   verrijk    register      └─► voorgestelde status
+                                 + evidence            │
+                                                       ▼
+                                      Express API ──► React-dashboard
+                                                       │
+                                     ambtenaar bevestigt of wijst af
+                                     (met naam en tijdstip, in de database)
+```
+
+## Snel starten
+
+Eén commando zet database, ingest, demodata, API en frontend samen op:
+
+```bash
+docker compose up --build        # of: npm run dev
+```
+
+- Frontend: <http://localhost:5173>
+- API: <http://localhost:3000>
+- De stack laadt automatisch **Schoten / Paalstraat** in (379 inschrijvingen uit
+  de live VKBO-API) en berekent er voorstellen voor.
+
+```bash
+npm run dev:down                 # stoppen
+npm run dev:reset                # stoppen + database wissen (na een migratie)
+```
+
+> **Demo-modus.** De online signalen in deze stack zijn **gelabelde mockdata**
+> (`bron = 'demo_mock'`), zodat alle kleuren, filters en kaartcategorieën te
+> demonstreren zijn zonder betaalde Google Places-key. De frontend toont dat
+> label ook zichtbaar in de interface. De echte Places-koppeling zit wel in de
+> repo — zie [Google Places-verrijking](#google-places-verrijking-publiek-bewijs-geen-automatisch-oordeel).
+
+### Zonder Docker
+
+```bash
+npm install
+cp .env.example .env             # vul DATABASE_URL in
+npm run ingest    -- Schoten Paalstraat
+npm run demo-data -- Schoten Paalstraat     # optioneel: gelabelde mocksignalen
+npm run beoordeel -- Schoten Paalstraat
+npm run serve                               # API op :3000
+
+cd frontend && npm install && npm run dev   # UI op :5173
+```
+
+`VITE_API_URL` is optioneel — de frontend valt terug op `http://localhost:3000`.
+
+## Inhoud
+
+| | |
+| --- | --- |
+| **Model** | [Begrippenkader](#begrippenkader) · [De vijf regels](#de-vijf-regels-die-het-schema-afdwingt) · [De tabellen](#de-tabellen) · [Ontwerpbeslissingen](#drie-ontwerpbeslissingen-die-de-data-afdwong) |
+| **Data in** | [Migraties](#migraties-draaien) · [VKBO-eigenaardigheden](#twee-eigenaardigheden-van-de-vkbo-bron) · [Ingest](#ingest-script-vkbo-live-api---supabase) · [Google Places](#google-places-verrijking-publiek-bewijs-geen-automatisch-oordeel) |
+| **Logica en UI** | [Confidence-engine](#confidence-engine-van-evidence-naar-een-voorstel) · [REST-API](#rest-api-voor-de-frontend) · [Frontend](#frontend-het-dashboard-voor-de-economieambtenaar) |
+| **Rest** | [Toegang (RLS)](#toegang-rls) · [Wat er nog niet in zit](#wat-er-nog-niet-in-zit) · [Bronnen](#bronnen) |
 
 ## Begrippenkader
 
@@ -39,9 +102,17 @@ precies de gevallen die de tool moet kunnen tonen.
 4. **Nooit iets verzinnen.** Ontbrekende contactgegevens zijn `NULL`, en de
    frontend toont dan "Contactgegevens onbekend". De constraint
    `evidence_heeft_inhoud` weigert een bewijsrij zonder inhoud.
-5. **Zekerheid is Hoog / Middel / Laag, met redenen.** `zekerheid` accepteert
-   alleen die drie waarden — een percentage wordt geweigerd. `redenen` moet een
-   niet-lege JSON-array van strings zijn, elk signaal apart. Geen black box.
+5. **Zekerheid is een percentage én een band, met redenen.**
+   `zekerheid_percentage` is de kans (5–95) dat de zaak echt actief is op het
+   geregistreerde adres; `zekerheid` is diezelfde waarde als band Hoog (≥ 70%)
+   / Middel (40–69%) / Laag (< 40%), voor kleuren, filters en sortering. Een
+   constraint bewaakt dat die twee elkaar nooit tegenspreken.
+
+   Het percentage is **geen apart model**: het is een vaste, monotone
+   herschaling van dezelfde opgetelde signaalscore die ook de band bepaalt.
+   `redenen` blijft een niet-lege JSON-array van strings, elk signaal apart,
+   dus het getal is altijd na te rekenen. Geen black box. De omzetting staat
+   bij de [confidence-engine](#confidence-engine-van-evidence-naar-een-voorstel).
 
 ## De tabellen
 
@@ -153,6 +224,14 @@ getest tegen PostgreSQL 17: 39 controles op afgeleide velden, constraints,
 triggers en RLS — zowel in-process (PGlite) als tegen een echte
 gedockeriseerde Postgres via TCP.
 
+> **Over de testresultaten in dit document.** De controles die hieronder
+> beschreven staan (migraties, ingest, Places-pipeline, API, browserflow) zijn
+> tijdens de ontwikkeling uitgevoerd, maar de testsuites zelf zijn **niet in
+> deze repo gecommit** — je kunt ze dus niet zelf draaien. Wat je wél kunt
+> natrekken is de volledige pipeline end-to-end via `docker compose up`. Een
+> gecommitte testsuite staat op de lijst bij
+> [Wat er nog niet in zit](#wat-er-nog-niet-in-zit).
+
 Volgorde is belangrijk — de bestandsnamen regelen dat:
 
 | Bestand | Inhoud |
@@ -163,7 +242,7 @@ Volgorde is belangrijk — de bestandsnamen regelen dat:
 | `20260916120300_evidence.sql` | Bewijs |
 | `20260916120400_beoordelingen.sql` | Voorstellen |
 | `20260916120500_rls.sql` | Row Level Security |
-| `20260916130000_nace.sql` | NACE-activiteitscodes + `nace_afdeling()` (prompt 4, domicilie-bevestiging) |
+| `20260916130000_nace.sql` | NACE-activiteitscodes + `nace_afdeling()`, voor de domicilie-bevestiging |
 
 ## Twee eigenaardigheden van de VKBO-bron
 
@@ -208,7 +287,7 @@ pagineert zelf tot alles opgehaald is, en upsert elke rij in de juiste tabel:
   placeholder aangemaakt — zie `zorgVoorOnderneming()` in
   [scripts/lib/database.js](scripts/lib/database.js).
 - `adres_gevalideerd` en `is_vme` worden **niet** in JavaScript herberekend: die
-  blijven een `GENERATED` kolom en een trigger in de database (uit prompt 1).
+  blijven een `GENERATED` kolom en een trigger in de database.
   Het script leest ze enkel terug via `RETURNING`, zodat er maar één plek is die
   bepaalt wat "gevalideerd" of "VME" betekent.
 - **Domicilie-heuristiek**: na het inladen van een straat telt het script hoeveel
@@ -336,8 +415,8 @@ Neemt establishment + enterprise + alle evidence van één vestiging, geeft een
 voorstel terug. Nooit een definitieve wijziging: het resultaat wordt altijd
 weggeschreven naar `beoordelingen` met `status = 'te_controleren'`.
 
-**De 8 kernregels uit de opdracht**, elk ±1, elk met een eigen leesbare regel
-in `redenen` (geen black box — zie ook de zekerheid-regel uit prompt 1):
+**De 8 kernregels**, elk ±1, elk met een eigen leesbare regel in `redenen` —
+geen black box:
 
 ```
 + businessStatus = OPERATIONAL          - businessStatus = CLOSED_PERMANENTLY/_TEMPORARILY
@@ -346,13 +425,28 @@ in `redenen` (geen black box — zie ook de zekerheid-regel uit prompt 1):
 + adres_gevalideerd = true              - enterprise.is_gestopt = true
 ```
 
-**Zekerheid — drempels op de opgetelde score** (bereik ongeveer -4 tot +4):
+**Van score naar percentage.** De opgetelde score (bereik ongeveer -4 tot +4)
+wordt via `percentageVanScore()` herschaald naar een kans, en die kans bepaalt
+de band. Eén vaste, monotone omzetting — geen tweede model, geen verborgen
+weging:
 
-| Score | Zekerheid |
-| --- | --- |
-| ≥ 2 | Hoog — minstens 2 signalen méér vóór dan tegen |
-| 0 of 1 | Middel — gemengd, of maar één zwak signaal |
-| < 0 | Laag — meer tegen dan vóór |
+| Score | Kans | Band | Betekenis |
+| --- | --- | --- | --- |
+| ≥ 2 | ≥ 70% | Hoog | Minstens 2 signalen méér vóór dan tegen |
+| 0 of 1 | 40–69% | Middel | Gemengd, of maar één zwak signaal |
+| < 0 | < 40% | Laag | Meer tegen dan vóór |
+
+```
+score  -4   -3   -2   -1    0    1    2    3    4
+pct     5%   8%  17%  31%  50%  69%  83%  92%  95%
+```
+
+De drempels zijn exact dezelfde als toen er nog enkel een band was — er
+verschuift dus niets in wie waar terechtkomt, er komt enkel een getal bij dat
+*binnen* een band nog onderscheid maakt. Afgetopt op 5–95%: acht publieke
+signalen zijn nooit volledige zekerheid. Een constraint in
+[`beoordelingen`](supabase/migrations/20260916140000_zekerheid_percentage.sql)
+bewaakt dat band en percentage elkaar niet kunnen tegenspreken.
 
 **Voorgestelde status — losse, gerichte logica**, niet zomaar afgeleid van de
 score: "Google bevestigt OPERATIONAL, maar het KBO zegt gestopt" is een
@@ -362,15 +456,15 @@ toevoeging bovenop wat letterlijk gevraagd werd: als `ar_straat` gevuld is
 maar van `straat` verschilt (het adressenregister spreekt het KBO-adres
 actief tegen — iets anders dan "nooit gecontroleerd"), en er toch bewijs van
 activiteit is (of net geen match), stelt de engine `kbo_niet_op_adres` voor in
-plaats van het generieke `onzeker`/`waarschijnlijk_inactief`. Dat maakt gebruik
-van een enum-waarde uit prompt 1 die anders nooit geproduceerd zou worden.
+plaats van het generieke `onzeker`/`waarschijnlijk_inactief`. Zonder die regel zou die
+enum-waarde nooit geproduceerd worden.
 
 **Speciale gevallen uit de opdracht:**
 
 - **VME** (`is_vme = true`): geen beoordeling opgeslagen, enkel
   `{ uitgesloten_reden: 'gebouwbeheer_vme' }`. Getest: de database bevat
   achteraf écht geen `beoordelingen`-rij voor zo'n vestiging.
-- **Domicilieadres-bevestiging**: `is_domicilieadres_verdacht` (prompt 2) is
+- **Domicilieadres-bevestiging**: `is_domicilieadres_verdacht` is
   enkel een tellingssignaal — meer dan 15 inschrijvingen op één huisnummer.
   De opdracht vraagt om dat te bevestigen via NACE-diversiteit, dus is er een
   nieuwe, kleine migratie
@@ -420,7 +514,7 @@ duplicatie, en is precies wat de opdracht zelf als optie noemt.
 | `POST /vestiging/:id/beoordeel` | Roept de confidence-engine aan, slaat het voorstel op (of sluit uit bij VME) |
 | `POST /beoordeling/:id/bevestig` | Zet `status='bevestigd'` — vereist `{ "beoordeeld_door": "..." }` in de body |
 | `POST /beoordeling/:id/wijs-af` | Idem, `status='afgewezen'` |
-| `GET /te-controleren` | Openstaande voorstellen, **Laag** eerst |
+| `GET /te-controleren` | Openstaande voorstellen, **laagste kans eerst** |
 
 Een paar keuzes die niet letterlijk in de opdracht stonden maar wel nodig
 bleken:
@@ -440,14 +534,14 @@ bleken:
   — nooit vermengd met de bedrijvenlijst.
 
 **Volledig getest op Paalstraat, Schoten** (echte gedockeriseerde Postgres,
-echte VKBO-data uit prompt 2, gerichte evidence-scenario's die elke tak van de
+echte VKBO-data, gerichte evidence-scenario's die elke tak van de
 engine raken — géén Google-calls nodig om de logica te testen): 48/48
 controles geslaagd, inclusief alle 7 endpoints, de bevestig/wijs-af/409-flow,
 en de Paalstraat 70-domicilie-check hierboven.
 
-**Eindresultaat voor Paalstraat, Schoten** (354 niet-VME vestigingen
-beoordeeld; de meeste hebben nog geen Google Places-gegevens, vandaar de
-concentratie op Middel/onzeker):
+**Eindresultaat voor Paalstraat, Schoten**, zoals `docker compose up` het
+oplevert (354 niet-VME vestigingen beoordeeld, met de gelabelde demosignalen —
+zie [Demo-modus](#snel-starten)):
 
 | | |
 | --- | --- |
@@ -455,17 +549,23 @@ concentratie op Middel/onzeker):
 | Uitgesloten als VME (gebouwbeheer) | 25 |
 | Samengevouwen als domicilie-groep | 25 (Paalstraat 70 — **niet** bevestigd als brievenbusadres, zie hierboven) |
 | Beoordeeld | 354 |
-| — Hoog | 1 (de ene vestiging met volledige Google Places-evidence: status, website, reviews, gevalideerd adres) |
-| — Middel | 352 (voornamelijk: adres is in orde, maar nog geen Google Places-gegevens) |
-| — Laag | 1 (kunstmatig scenario voor de test: geen match + adres dat het register tegenspreekt) |
+| — Hoog (≥ 70%) | 210 |
+| — Middel (40–69%) | 72 |
+| — Laag (< 40%) | 72 |
+| Gemiddelde kans | 69% |
+
+De demosignalen zijn bewust in meerdere varianten geschreven, zodat de
+percentages over de hele schaal spreiden (8, 17, 31, 50, 69, 83, 92, 95%) in
+plaats van drie keer dezelfde waarde te herhalen — anders zegt "83%" niets meer
+dan het woord "Hoog". Verdeling van de voorgestelde status: 210× `actief`,
+72× `kbo_niet_op_adres`, 54× `waarschijnlijk_inactief`, 18× `onzeker`.
 
 ## Frontend — het dashboard voor de economieambtenaar
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env       # VITE_API_URL, default http://localhost:3000
-npm run dev
+npm run dev                # VITE_API_URL is optioneel, default http://localhost:3000
 ```
 
 React + Vite, praat rechtstreeks met de bestaande API (`fetch`, zie
@@ -478,17 +578,19 @@ OpenStreetMap-tegels**, gratis, geen API-key.
 | `/` | Dashboard — KPI's, zoekbalk, filters, kaart + lijst |
 | `/straat` | Analyseer straat — de tabel met exact de gevraagde kolommen |
 | `/vestiging/:id` | Detailpagina — adres lokaal vs. zetel, evidence-tijdlijn, redenen, bevestig/wijs-af |
-| `/te-controleren` | Review-queue, Laag eerst, inline bevestig/wijs-af |
+| `/te-controleren` | Review-queue, laagste kans eerst, inline bevestig/wijs-af |
 
-**Sortering, zoals expliciet gevraagd:** default overal Laag → Hoog zekerheid;
-op het Dashboard is dat een knop ("Sorteer op zekerheid: Laag eerst /
-Hoog eerst"), op de review-queue vast (dat IS de hele pagina).
+**Sortering, zoals expliciet gevraagd:** default overal laagste → hoogste
+zekerheid; op het Dashboard is dat een knop ("Sorteer op kans: laagste eerst /
+hoogste eerst"), op de review-queue vast (dat IS de hele pagina). Er wordt
+gesorteerd op het percentage zelf en niet op de band: binnen "Laag" is 8%
+dringender dan 31%, en dat verschil zag je met alleen een band niet.
 
 **Twee kleine, bewuste afwijkingen van de letterlijke tekst**, beide om de
 ambtenaar niet te misleiden:
 
 1. De opdracht geeft een vaste tekst voor een samengevouwen domicilie-rij
-   ("vermoedelijk domicilieadres"). Sinds prompt 4 kan de engine dat ook
+   ("vermoedelijk domicilieadres"). De engine kan dat ook
    **weerleggen** (NACE-diversiteit) — dus toont de rij naargelang het geval
    "bevestigd als vermoedelijk brievenbusadres: ..." of "NIET bevestigd:
    activiteiten liggen dicht bij elkaar, vermoedelijk een legitiem
@@ -534,6 +636,9 @@ Twee echte bugs kwamen daarbij naar boven, allebei gefixt:
 
 ## Wat er nog niet in zit
 
+- **Geen gecommitte testsuite.** De controles in dit document zijn tijdens de
+  ontwikkeling gedraaid, maar staan niet in de repo — er is dus niets om in CI
+  te hangen. Dit is de eerste schuld die afbetaald moet worden.
 - `evidence` hangt altijd aan een vestiging. Bewijs voor een zaak die nog niet in
   het register staat (`mogelijk_ontbrekend`) past er dus nog niet in; dat zit nu
   in `redenen` en `voorstel_tekst` van de beoordeling.
@@ -560,6 +665,10 @@ Twee echte bugs kwamen daarbij naar boven, allebei gefixt:
 - **NBB CBSO jaarrekeningen** — nog 10 requests over. **Niet** in de automatische
   pipeline gebruiken; enkel handmatig voor één of twee twijfelgevallen.
 
-Cijfers in dit document komen uit `KBO/schoten-kbo-1000-2026-09-07.geojson`
-(1000 inschrijvingen, opgehaald 2026-09-07) — één pagina, dus niet de volledige
-gemeente.
+**Waar de cijfers vandaan komen.** De steekproefcijfers (105 VME's op 1000
+inschrijvingen, 35 in vereffening, ...) komen uit
+`KBO/schoten-kbo-1000-2026-09-07.geojson` — 1000 inschrijvingen, opgehaald op
+2026-09-07, één pagina en dus niet de volledige gemeente. De
+Paalstraat-resultaten (379 establishments, 354 beoordelingen, de
+percentageverdeling) komen uit een verse `docker compose up`-run en zijn
+reproduceerbaar met dat ene commando.

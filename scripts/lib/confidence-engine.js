@@ -9,6 +9,40 @@
 // regel in `redenen`, opgeteld tot één score, nooit een ondoorzichtig getal.
 // ============================================================================
 
+// De drempels waarmee een percentage weer een band (Hoog/Middel/Laag) wordt.
+// Bewust op één plek: kleuren, filters en sortering in de frontend gebruiken
+// dezelfde grenzen.
+export const ZEKERHEID_DREMPEL_HOOG = 70
+export const ZEKERHEID_DREMPEL_MIDDEL = 40
+
+// Steilheid van de omzetting score -> percentage. 0.8 geeft een reeks die
+// dicht bij de oude drempels blijft en nooit 0% of 100% claimt:
+//   score  -4   -3   -2   -1    0    1    2    3    4
+//   pct     5%   8%  17%  31%  50%  69%  83%  92%  95%
+const PERCENTAGE_STEILHEID = 0.8
+// Nooit volledige zekerheid suggereren: acht signalen blijven acht signalen,
+// geen bewijs. Daarom afgetopt op 5%-95%.
+const PERCENTAGE_MIN = 5
+const PERCENTAGE_MAX = 95
+
+/**
+ * Zet de opgetelde score om in een kans (in hele procenten) dat de zaak echt
+ * actief is op het geregistreerde adres. Logistische curve rond score 0 = 50%:
+ * elk extra signaal weegt door, maar de uitersten lopen nooit naar 0 of 100.
+ * Puur een herschaling van de score — geen nieuwe signalen, geen weging.
+ */
+export function percentageVanScore (score) {
+  const ruw = 100 / (1 + Math.exp(-PERCENTAGE_STEILHEID * score))
+  return Math.min(PERCENTAGE_MAX, Math.max(PERCENTAGE_MIN, Math.round(ruw)))
+}
+
+/** Percentage -> Hoog / Middel / Laag, met de drempels hierboven. */
+export function bandVanPercentage (percentage) {
+  if (percentage >= ZEKERHEID_DREMPEL_HOOG) return 'Hoog'
+  if (percentage >= ZEKERHEID_DREMPEL_MIDDEL) return 'Middel'
+  return 'Laag'
+}
+
 /** Meest recente evidence-rij van een bepaald type, of null. */
 function laatsteVanType (evidence, type) {
   const rijen = evidence
@@ -33,15 +67,17 @@ function laatsteVanType (evidence, type) {
  *   als establishment.is_domicilieadres_verdacht true is.
  *
  * @returns {object} - bij is_vme: { uitgesloten_reden: 'gebouwbeheer_vme' }.
- *   Anders: { zekerheid, redenen, voorgestelde_status, voorstel_tekst,
- *   uitgesloten_reden: null, score, domicilieadres_bevestigd }.
+ *   Anders: { zekerheid, zekerheid_percentage, redenen, voorgestelde_status,
+ *   voorstel_tekst, uitgesloten_reden: null, score, domicilieadres_bevestigd }.
+ *   zekerheid_percentage is de kans (5-95) dat de zaak echt actief is;
+ *   zekerheid is diezelfde waarde als band Hoog/Middel/Laag.
  */
 export function berekenBeoordeling ({ establishment, enterprise, evidence, domicilieBevestiging = null }) {
   // Speciaal geval 1: VME's zijn gebouwbeheer, geen bedrijf. Geen beoordeling
   // — de aanroeper mag op basis van uitgesloten_reden beslissen niets weg te
   // schrijven naar `beoordelingen`.
   if (establishment.is_vme) {
-    return { uitgesloten_reden: 'gebouwbeheer_vme', zekerheid: null, redenen: null, voorgestelde_status: null, voorstel_tekst: null, score: null, domicilieadres_bevestigd: null }
+    return { uitgesloten_reden: 'gebouwbeheer_vme', zekerheid: null, zekerheid_percentage: null, redenen: null, voorgestelde_status: null, voorstel_tekst: null, score: null, domicilieadres_bevestigd: null }
   }
 
   const statusEvidence = laatsteVanType(evidence, 'status')
@@ -112,16 +148,20 @@ export function berekenBeoordeling ({ establishment, enterprise, evidence, domic
     redenen.push('- geen Google Places-gegevens beschikbaar (nog niet gecontroleerd)')
   }
 
-  // --- zekerheid: drempels op de opgetelde score ----------------------------
-  // Bereik is ongeveer -4 (alle negatieve signalen) tot +4 (alle positieve).
-  // Drempels bewust ruim en makkelijk uit te leggen:
-  //   score >= 2   -> Hoog    (minstens 2 signalen méér vóór dan tegen)
-  //   0 <= score < 2 -> Middel (gemengd, of maar één zwak signaal)
-  //   score < 0    -> Laag    (meer tegen dan vóór)
-  let zekerheid
-  if (score >= 2) zekerheid = 'Hoog'
-  else if (score >= 0) zekerheid = 'Middel'
-  else zekerheid = 'Laag'
+  // --- zekerheid: van opgetelde score naar percentage -----------------------
+  // De score blijft de kern: elk signaal is +1 of -1 en staat als leesbare
+  // regel in `redenen`. percentageVanScore() is enkel een vaste, monotone
+  // omzetting van diezelfde score naar een kans dat de zaak echt actief is,
+  // zodat de ambtenaar "83%" ziet in plaats van alleen "Hoog". Geen extra
+  // logica en geen verborgen weging: dezelfde score geeft altijd hetzelfde
+  // percentage, en met de redenenlijst erbij is dat percentage na te rekenen.
+  //
+  // De band Hoog/Middel/Laag blijft bestaan (kleuren, filters, sortering) maar
+  // wordt nu afgeleid van het percentage — met exact dezelfde drempels als
+  // voorheen: score >= 2 → >= 70% → Hoog, score 0..1 → 40..69% → Middel,
+  // score < 0 → < 40% → Laag.
+  const zekerheidPercentage = percentageVanScore(score)
+  const zekerheid = bandVanPercentage(zekerheidPercentage)
 
   // --- voorgestelde status: gerichte logica, los van de score --------------
   // Zekerheid ("hoe zeker zijn we") en voorgestelde_status ("wat denken we
@@ -153,6 +193,7 @@ export function berekenBeoordeling ({ establishment, enterprise, evidence, domic
   return {
     uitgesloten_reden: null,
     zekerheid,
+    zekerheid_percentage: zekerheidPercentage,
     redenen,
     voorgestelde_status: voorgesteldeStatus,
     voorstel_tekst: null,

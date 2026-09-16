@@ -55,6 +55,7 @@ function naarVestigingEntry (rij) {
       ? {
           id: rij.beoordeling_id,
           zekerheid: rij.zekerheid,
+          zekerheid_percentage: rij.zekerheid_percentage,
           voorgestelde_status: rij.voorgestelde_status,
           status: rij.beoordeling_status,
           redenen: rij.redenen,
@@ -204,12 +205,20 @@ export function bouwApp (pool) {
         [req.params.gemeente, req.params.straat]
       )
       const telling = { Hoog: 0, Middel: 0, Laag: 0, uitgesloten: 0 }
+      const percentages = []
       for (const { id } of rows) {
         const uitkomst = await berekenEnBewaar(id)
-        if (uitkomst.resultaat.uitgesloten_reden) telling.uitgesloten++
-        else telling[uitkomst.beoordeling.zekerheid]++
+        if (uitkomst.resultaat.uitgesloten_reden) {
+          telling.uitgesloten++
+        } else {
+          telling[uitkomst.beoordeling.zekerheid]++
+          percentages.push(uitkomst.beoordeling.zekerheid_percentage)
+        }
       }
-      res.json({ aantal: rows.length, ...telling })
+      const gemiddeldPercentage = percentages.length > 0
+        ? Math.round(percentages.reduce((a, b) => a + b, 0) / percentages.length)
+        : null
+      res.json({ aantal: rows.length, ...telling, gemiddeld_percentage: gemiddeldPercentage })
     } catch (fout) { next(fout) }
   })
 
@@ -249,6 +258,7 @@ export function bouwApp (pool) {
           naam: r.naam,
           adres: r.establishment_id ? { straat: r.straat, huisnr: r.huisnr, postcode: r.postcode, gemeente: r.gemeente } : null,
           zekerheid: r.zekerheid,
+          zekerheid_percentage: r.zekerheid_percentage,
           redenen: r.redenen,
           voorgestelde_status: r.voorgestelde_status,
           voorstel_tekst: r.voorstel_tekst,

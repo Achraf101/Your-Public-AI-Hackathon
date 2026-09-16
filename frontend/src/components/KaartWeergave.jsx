@@ -42,7 +42,7 @@ function PasBereikAan ({ punten }) {
 }
 
 /**
- * @param {Array<{ id: string, lat: number, lng: number, naam: string, zekerheid?: string|null }>} punten
+ * @param {Array<{ id: string, lat: number, lng: number, naam: string, zekerheid?: string|null, percentage?: number|null }>} punten
  * @param {(id: string) => void} [onMarkerKlik]
  */
 export default function KaartWeergave ({ punten, onMarkerKlik, hoogte = 360 }) {
@@ -81,7 +81,9 @@ export default function KaartWeergave ({ punten, onMarkerKlik, hoogte = 360 }) {
           <Popup>
             <strong>{p.naam ?? p.id}</strong>
             <br />
-            Zekerheid: {p.zekerheid ?? 'nog niet beoordeeld'}
+            {typeof p.percentage === 'number'
+              ? `${p.percentage}% kans dat deze zaak echt actief is (${p.zekerheid})`
+              : `Zekerheid: ${p.zekerheid ?? 'nog niet beoordeeld'}`}
           </Popup>
         </CircleMarker>
       ))}

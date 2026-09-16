@@ -6,10 +6,19 @@ import KaartWeergave from '../components/KaartWeergave'
 import ZekerheidBadge from '../components/ZekerheidBadge'
 import StatusBadge from '../components/StatusBadge'
 import { useStraatData, alleVestigingenPlat } from '../useStraatData'
-import { ZEKERHEID_VOLGORDE, STATUS_LABEL, formatteerAdres } from '../labels'
+import {
+  STATUS_LABEL, formatteerAdres, bandVanBeoordeling, zekerheidSorteersleutel,
+  ZEKERHEID_DREMPEL_HOOG, ZEKERHEID_DREMPEL_MIDDEL
+} from '../labels'
 import { api } from '../api'
 
-const ZEKERHEID_OPTIES = ['Hoog', 'Middel', 'Laag']
+// Filteren gebeurt nu op kansbereik i.p.v. op het woord alleen — het label
+// toont allebei, zodat duidelijk blijft waar de grenzen liggen.
+const ZEKERHEID_OPTIES = [
+  { band: 'Hoog', label: `Hoog (≥ ${ZEKERHEID_DREMPEL_HOOG}%)` },
+  { band: 'Middel', label: `Middel (${ZEKERHEID_DREMPEL_MIDDEL}–${ZEKERHEID_DREMPEL_HOOG - 1}%)` },
+  { band: 'Laag', label: `Laag (< ${ZEKERHEID_DREMPEL_MIDDEL}%)` }
+]
 // Bewust exact de 5 statuswaarden uit de opdracht als filterknop — de engine
 // kan ook 'waarschijnlijk_actief' voorstellen; die blijft gewoon zichtbaar in
 // de lijst, maar krijgt geen eigen knop (zo expliciet gevraagd).
@@ -40,21 +49,28 @@ export default function Dashboard () {
   const kpis = useMemo(() => {
     const totaal = data?.aantal_establishments ?? 0
     let actief = 0, inactief = 0, ontbrekend = 0, laag = 0, teControleren = 0
+    const percentages = []
     for (const v of vestigingen) {
       const status = v.beoordeling?.voorgestelde_status
       if (status === 'actief' || status === 'waarschijnlijk_actief') actief++
       if (status === 'waarschijnlijk_inactief') inactief++
       if (status === 'mogelijk_ontbrekend') ontbrekend++
-      if (v.beoordeling?.zekerheid === 'Laag') laag++
+      if (bandVanBeoordeling(v.beoordeling) === 'Laag') laag++
       if (!v.beoordeling || v.beoordeling.status === 'te_controleren') teControleren++
+      if (typeof v.beoordeling?.zekerheid_percentage === 'number') {
+        percentages.push(v.beoordeling.zekerheid_percentage)
+      }
     }
-    return { totaal, actief, inactief, ontbrekend, laag, teControleren }
+    const gemiddelde = percentages.length > 0
+      ? Math.round(percentages.reduce((a, b) => a + b, 0) / percentages.length)
+      : null
+    return { totaal, actief, inactief, ontbrekend, laag, teControleren, gemiddelde }
   }, [data, vestigingen])
 
   const gefilterd = useMemo(() => {
     const term = zoekterm.trim().toLowerCase()
     let lijst = vestigingen.filter((v) => {
-      if (zekerheidFilter.size > 0 && !zekerheidFilter.has(v.beoordeling?.zekerheid)) return false
+      if (zekerheidFilter.size > 0 && !zekerheidFilter.has(bandVanBeoordeling(v.beoordeling))) return false
       if (statusFilter.size > 0 && !statusFilter.has(v.beoordeling?.voorgestelde_status)) return false
       if (!term) return true
       const doorzoekbaar = [
@@ -64,16 +80,23 @@ export default function Dashboard () {
       ].filter(Boolean).join(' ').toLowerCase()
       return doorzoekbaar.includes(term)
     })
+    // Sorteren op het percentage zelf, niet op de band: binnen "Laag" is 8%
+    // dringender dan 31%, en dat verschil zag je vroeger niet.
     lijst = [...lijst].sort((a, b) => {
-      const ra = ZEKERHEID_VOLGORDE[a.beoordeling?.zekerheid] ?? -1
-      const rb = ZEKERHEID_VOLGORDE[b.beoordeling?.zekerheid] ?? -1
+      const ra = zekerheidSorteersleutel(a.beoordeling)
+      const rb = zekerheidSorteersleutel(b.beoordeling)
       return sorteerOplopend ? ra - rb : rb - ra
     })
     return lijst
   }, [vestigingen, zoekterm, zekerheidFilter, statusFilter, sorteerOplopend])
 
   const kaartPunten = gefilterd.map((v) => ({
-    id: v.vestiging_id, lat: v.latitude, lng: v.longitude, naam: v.naam, zekerheid: v.beoordeling?.zekerheid
+    id: v.vestiging_id,
+    lat: v.latitude,
+    lng: v.longitude,
+    naam: v.naam,
+    zekerheid: bandVanBeoordeling(v.beoordeling),
+    percentage: v.beoordeling?.zekerheid_percentage ?? null
   }))
 
   async function herberekenStraat () {
@@ -81,7 +104,10 @@ export default function Dashboard () {
     setActieMelding(null)
     try {
       const resultaat = await api.herberekenStraat(gemeente, straat)
-      setActieMelding(`${resultaat.aantal - resultaat.uitgesloten} voorstellen bijgewerkt: ${resultaat.Hoog} Hoog, ${resultaat.Middel} Middel, ${resultaat.Laag} Laag.`)
+      const gemiddelde = resultaat.gemiddeld_percentage != null
+        ? ` Gemiddelde kans: ${resultaat.gemiddeld_percentage}%.`
+        : ''
+      setActieMelding(`${resultaat.aantal - resultaat.uitgesloten} voorstellen bijgewerkt: ${resultaat.Hoog} hoog (≥70%), ${resultaat.Middel} middel (40–69%), ${resultaat.Laag} laag (<40%).${gemiddelde}`)
       herlaad()
     } catch (e) {
       setActieMelding(`Herberekenen mislukte: ${e.message}`)
@@ -96,7 +122,10 @@ export default function Dashboard () {
         <div>
           <p className="eyebrow">Controlecentrum</p>
           <h1>Welke zaken verdienen aandacht?</h1>
-          <p className="pagina-intro">Eerst de lage zekerheid. Klik een zaak voor de uitleg en bewijsbronnen.</p>
+          <p className="pagina-intro">
+            Elke zaak krijgt een kans dat ze echt actief is op het geregistreerde adres,
+            berekend uit de signalen die je bij de zaak zelf terugvindt. Laagste kans eerst.
+          </p>
           <span className="demo-label">Demo-modus · mocksignalen</span>
         </div>
         <button type="button" className="knop knop--primair" disabled={herberekenen} onClick={herberekenStraat}>
@@ -120,7 +149,12 @@ export default function Dashboard () {
             <KpiKaart label="Vestigingen" waarde={kpis.totaal} />
             <KpiKaart label="Waarschijnlijk actief" waarde={kpis.actief} accent="#15803d" />
             <KpiKaart label="Mogelijk inactief" waarde={kpis.inactief} accent="#dc2626" />
-            <KpiKaart label="Lage zekerheid" waarde={kpis.laag} toelichting="Eerst nakijken" accent="#dc2626" />
+            <KpiKaart label="Kans < 40%" waarde={kpis.laag} toelichting="Eerst nakijken" accent="#dc2626" />
+            <KpiKaart
+              label="Gemiddelde kans"
+              waarde={kpis.gemiddelde != null ? `${kpis.gemiddelde}%` : '—'}
+              toelichting="Over deze straat"
+            />
             <KpiKaart label="Open voorstellen" waarde={kpis.teControleren} accent="#d97706" />
           </div>
 
@@ -137,21 +171,21 @@ export default function Dashboard () {
               onChange={(e) => setZoekterm(e.target.value)}
             />
             <button type="button" className="knop knop--secundair" onClick={() => setSorteerOplopend((v) => !v)}>
-              Sorteer op zekerheid: {sorteerOplopend ? 'Laag eerst' : 'Hoog eerst'}
+              Sorteer op kans: {sorteerOplopend ? 'laagste eerst' : 'hoogste eerst'}
             </button>
           </div>
 
           <div className="filter-rij">
             <div className="filter-groep">
-              <span className="filter-groep__label">Zekerheid:</span>
+              <span className="filter-groep__label">Kans:</span>
               {ZEKERHEID_OPTIES.map((z) => (
                 <button
-                  key={z}
+                  key={z.band}
                   type="button"
-                  className={`filter-knop ${zekerheidFilter.has(z) ? 'filter-knop--actief' : ''}`}
-                  onClick={() => setZekerheidFilter((s) => wisselInSet(s, z))}
+                  className={`filter-knop ${zekerheidFilter.has(z.band) ? 'filter-knop--actief' : ''}`}
+                  onClick={() => setZekerheidFilter((s) => wisselInSet(s, z.band))}
                 >
-                  {z}
+                  {z.label}
                 </button>
               ))}
             </div>
@@ -181,7 +215,10 @@ export default function Dashboard () {
                     <div className="vestiging-lijst__adres">{formatteerAdres(v.adres)}</div>
                   </div>
                   <div className="vestiging-lijst__badges">
-                    <ZekerheidBadge zekerheid={v.beoordeling?.zekerheid} />
+                    <ZekerheidBadge
+                      percentage={v.beoordeling?.zekerheid_percentage}
+                      zekerheid={v.beoordeling?.zekerheid}
+                    />
                     <StatusBadge status={v.beoordeling?.voorgestelde_status} />
                   </div>
                 </li>
